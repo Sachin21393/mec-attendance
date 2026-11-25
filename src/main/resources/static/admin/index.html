@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Workforce Attendance — Admin Dashboard</title>
+  <link rel="stylesheet" href="/shared/styles.css">
+  <link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+  <!-- Admin Login -->
+  <main id="admin-login-view" class="login-shell">
+    <section class="card login-card">
+      <div class="brand-row" style="justify-content: center; margin-bottom: 16px;">
+        <span class="brand-badge" aria-hidden="true">WA</span>
+        <h1 style="margin: 0; font-size: 1.25rem;">Admin Dashboard</h1>
+      </div>
+      <p class="helper-text" style="text-align: center; margin-bottom: 20px;">
+        Sign in with your administrator account.
+      </p>
+      <div id="login-error" class="banner banner-error" hidden></div>
+      <form id="form-admin-login">
+        <div class="field">
+          <label for="login-username">Username</label>
+          <input id="login-username" class="input" type="text" autocomplete="username" required>
+        </div>
+        <div class="field">
+          <label for="login-password">Password</label>
+          <input id="login-password" class="input" type="password" autocomplete="current-password" required>
+        </div>
+        <button id="btn-login-submit" type="submit" class="btn btn-primary btn-block">Sign in</button>
+      </form>
+      <p class="helper-text" style="text-align: center; margin-top: 16px;">
+        <a href="/worker/">Go to Worker Attendance App</a>
+      </p>
+    </section>
+  </main>
+
+  <!-- Authenticated Admin Shell -->
+  <div id="admin-app" class="admin-shell" hidden>
+    <aside id="admin-sidebar" class="sidebar" aria-label="Primary navigation">
+      <div class="sidebar-top">
+        <div class="brand-row">
+          <span class="brand-badge" aria-hidden="true">WA</span>
+          <div>
+            <div class="brand-name">Attendance</div>
+            <div class="brand-sub">Admin Console</div>
+          </div>
+        </div>
+        <button id="btn-close-nav" type="button" class="btn btn-ghost mobile-only" aria-label="Close navigation">&times;</button>
+      </div>
+
+      <nav class="nav-list">
+        <button type="button" class="nav-item active" data-tab="dashboard">Dashboard</button>
+        <button type="button" class="nav-item" data-tab="attendance">Attendance</button>
+        <button type="button" class="nav-item" data-tab="workers">Workers</button>
+        <button type="button" class="nav-item" data-tab="reports">Reports / Export</button>
+        <button type="button" class="nav-item" data-tab="settings">Settings</button>
+        <button type="button" class="nav-item" data-tab="audit">Audit Log</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div id="admin-user-label" class="helper-text" style="margin-bottom: 8px;">Signed in</div>
+        <button id="btn-admin-logout" type="button" class="btn btn-secondary btn-block">Sign out</button>
+      </div>
+    </aside>
+
+    <div class="admin-main-wrap">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="btn-open-nav" type="button" class="btn btn-secondary mobile-only" aria-label="Open navigation">Menu</button>
+          <div>
+            <h1 id="topbar-workplace" class="topbar-title">Workforce Attendance</h1>
+            <span id="topbar-timezone" class="tz-pill">Timezone: -</span>
+          </div>
+        </div>
+
+        <div class="topbar-controls">
+          <button id="btn-prev-month" type="button" class="btn btn-secondary" aria-label="Previous month">&larr;</button>
+          <label class="sr-only" for="input-month">Select month</label>
+          <input id="input-month" class="input month-input" type="month" value="2026-11">
+          <button id="btn-next-month" type="button" class="btn btn-secondary" aria-label="Next month">&rarr;</button>
+        </div>
+      </header>
+
+      <main class="admin-content">
+        <div id="admin-global-error" class="banner banner-error" hidden></div>
+
+        <!-- Dashboard + Attendance Grid -->
+        <section id="tab-dashboard" class="tab-panel">
+          <div id="kpi-grid" class="kpi-grid">
+            <div class="card kpi-card"><span class="kpi-label">Working days</span><strong id="kpi-working-days" class="kpi-val">-</strong></div>
+            <div class="card kpi-card"><span class="kpi-label">Present today</span><strong id="kpi-present-today" class="kpi-val">-</strong></div>
+            <div class="card kpi-card kpi-ontime"><span class="kpi-label">On time</span><strong id="kpi-ontime-today" class="kpi-val">-</strong></div>
+            <div class="card kpi-card kpi-late"><span class="kpi-label">Late</span><strong id="kpi-late-today" class="kpi-val">-</strong></div>
+            <div class="card kpi-card kpi-absent"><span class="kpi-label">Absent</span><strong id="kpi-absent-today" class="kpi-val">-</strong></div>
+            <div class="card kpi-card"><span class="kpi-label">Not due</span><strong id="kpi-notdue-today" class="kpi-val">-</strong></div>
+          </div>
+
+          <section class="card" style="margin-top: 16px;">
+            <div class="toolbar">
+              <div>
+                <h2 style="margin: 0; font-size: 1.125rem;">Monthly Attendance</h2>
+                <p id="grid-subtitle" class="helper-text">Loading month overview...</p>
+              </div>
+              <div class="toolbar-filters">
+                <input id="grid-search" class="input" type="search" placeholder="Search worker name or code" style="max-width: 240px;">
+                <select id="grid-team-filter" class="select" style="max-width: 180px;">
+                  <option value="">All teams</option>
+                </select>
+                <button id="btn-export-shortcut" type="button" class="btn btn-primary">Export CSV</button>
+              </div>
+            </div>
+
+            <div class="legend-row" aria-label="Attendance status legend">
+              <span class="legend-item"><span class="cell-pill cell-ON_TIME">&#10003;</span> On time</span>
+              <span class="legend-item"><span class="cell-pill cell-LATE">L</span> Late</span>
+              <span class="legend-item"><span class="cell-pill cell-ABSENT">&#10005;</span> Absent</span>
+              <span class="legend-item"><span class="cell-pill cell-HOLIDAY">H</span> Holiday</span>
+              <span class="legend-item"><span class="cell-pill cell-WEEKLY_OFF">W</span> Weekly off</span>
+              <span class="legend-item"><span class="cell-pill cell-NOT_DUE">&middot;</span> Not due</span>
+              <span class="legend-item"><span class="proxy-dot">P</span> Proxy check-in</span>
+            </div>
+
+            <div id="grid-loading" class="skeleton-box" hidden>Loading attendance grid...</div>
+            <div id="grid-empty" class="helper-text" style="padding: 24px 0;" hidden>No workers match your search criteria.</div>
+
+            <div id="attendance-table-wrap" class="table-wrap">
+              <table id="attendance-table" class="att-table">
+                <thead id="attendance-thead"></thead>
+                <tbody id="attendance-tbody"></tbody>
+              </table>
+            </div>
+
+            <div class="pagination-bar">
+              <span id="pagination-info" class="helper-text">Page 1</span>
+              <div style="display: flex; gap: 8px;">
+                <button id="btn-page-prev" type="button" class="btn btn-secondary">Previous</button>
+                <button id="btn-page-next" type="button" class="btn btn-secondary">Next</button>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <!-- Workers Tab -->
+        <section id="tab-workers" class="tab-panel" hidden>
+          <div class="card">
+            <div class="toolbar">
+              <div>
+                <h2 style="margin: 0;">Workers</h2>
+                <p class="helper-text">Manage invitations, registration status, and device sessions.</p>
+              </div>
+              <button id="btn-toggle-invite-form" type="button" class="btn btn-primary">+ Invite Worker</button>
+            </div>
+
+            <div id="invite-created-banner" class="banner banner-success" hidden></div>
+
+            <form id="form-create-worker" class="inline-form-card" hidden>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="new-worker-code">Worker code</label>
+                  <input id="new-worker-code" class="input" type="text" placeholder="e.g. W011" required>
+                </div>
+                <div class="field">
+                  <label for="new-worker-name">Full name</label>
+                  <input id="new-worker-name" class="input" type="text" placeholder="Worker full name" required>
+                </div>
+                <div class="field">
+                  <label for="new-worker-team">Team</label>
+                  <input id="new-worker-team" class="input" type="text" placeholder="e.g. Assembly">
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary">Generate One-Time Invitation</button>
+            </form>
+
+            <div class="table-wrap" style="margin-top: 16px;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Team</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="workers-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- Placeholder tabs expanded in PR 7, 8, 9 -->
+        <section id="tab-reports" class="tab-panel" hidden>
+          <div class="card">
+            <h2>Reports / Export</h2>
+            <p class="helper-text">Month-wise CSV export and totals preview will be enabled in PR 8.</p>
+          </div>
+        </section>
+
+        <section id="tab-settings" class="tab-panel" hidden>
+          <div class="card">
+            <h2>Calendar &amp; System Settings</h2>
+            <p class="helper-text">Monthly working-day calendar editor, shift rules, and proxy cap settings will be enabled in PR 7.</p>
+          </div>
+        </section>
+
+        <section id="tab-audit" class="tab-panel" hidden>
+          <div class="card">
+            <h2>Audit Log</h2>
+            <p class="helper-text">Filterable security and correction audit log will be enabled in PR 9.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Cell Detail Drawer -->
+    <aside id="detail-drawer" class="drawer" hidden aria-label="Attendance record details">
+      <div class="drawer-header">
+        <h2 style="margin: 0; font-size: 1.125rem;">Attendance Details</h2>
+        <button id="btn-close-drawer" type="button" class="btn btn-ghost" aria-label="Close drawer">&times;</button>
+      </div>
+      <div id="drawer-body" class="drawer-body"></div>
+    </aside>
+  </div>
+
+  <script type="module" src="/admin/admin.js"></script>
+</body>
+</html>
