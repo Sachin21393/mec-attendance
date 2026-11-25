@@ -22,29 +22,37 @@ public class MockFaceRecognitionProvider implements FaceRecognitionProvider {
     private static final Logger log = LoggerFactory.getLogger(MockFaceRecognitionProvider.class);
 
     private final int dimension;
+    private final ImagePayloadValidator imageValidator;
 
-    public MockFaceRecognitionProvider(AttendanceProperties properties) {
+    public MockFaceRecognitionProvider(AttendanceProperties properties, ImagePayloadValidator imageValidator) {
         this.dimension = properties.getBiometrics().getEmbeddingDimension();
+        this.imageValidator = imageValidator;
         log.warn("Initialized MockFaceRecognitionProvider ({}D). This mode is for development/testing only and does NOT perform real facial recognition.", dimension);
     }
 
     @Override
     public ExtractionResult extractEmbedding(byte[] imageBytes) {
-        if (imageBytes == null || imageBytes.length < 16) {
+        if (imageBytes == null || imageBytes.length < 8) {
             throw new ValidationException("BIOMETRIC_IMAGE_INVALID", "Face capture payload is empty or too small.");
         }
-        String marker = new String(imageBytes, 0, Math.min(imageBytes.length, 64), StandardCharsets.UTF_8);
-        if (marker.contains("NO_FACE")) {
-            throw new ValidationException("NO_FACE_DETECTED", "No face detected. Place your face inside the frame.");
-        }
-        if (marker.contains("MULTI_FACE")) {
-            throw new ValidationException("MULTIPLE_FACES_DETECTED", "Multiple faces detected. Ensure only one person is in the frame.");
-        }
-        if (marker.contains("LOW_LIGHT")) {
-            throw new ValidationException("POOR_LIGHTING", "Lighting is too low. Move to a brighter area and try again.");
-        }
-        if (marker.contains("LIVENESS_FAIL")) {
-            throw new ValidationException("LIVENESS_CHECK_FAILED", "Liveness check failed. Look directly at the camera and try again.");
+
+        if (imageValidator.isSyntheticMockTokenPayload(imageBytes)) {
+            String marker = new String(imageBytes, StandardCharsets.UTF_8);
+            if (marker.contains("NO_FACE")) {
+                throw new ValidationException("NO_FACE_DETECTED", "No face detected. Place your face inside the frame.");
+            }
+            if (marker.contains("MULTI_FACE")) {
+                throw new ValidationException("MULTIPLE_FACES_DETECTED", "Multiple faces detected. Ensure only one person is in the frame.");
+            }
+            if (marker.contains("LOW_LIGHT")) {
+                throw new ValidationException("POOR_LIGHTING", "Lighting is too low. Move to a brighter area and try again.");
+            }
+            if (marker.contains("LIVENESS_FAIL")) {
+                throw new ValidationException("LIVENESS_CHECK_FAILED", "Liveness check failed. Look directly at the camera and try again.");
+            }
+        } else {
+            // Real image bytes submitted in mock mode still undergo full ImageIO validation
+            imageValidator.decodeAndValidateImage(imageBytes);
         }
 
         float[] embedding = deterministicUnitVector(imageBytes);
@@ -98,11 +106,14 @@ public class MockFaceRecognitionProvider implements FaceRecognitionProvider {
     private float[] deterministicUnitVector(byte[] input) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] seed = md.digest(input);
+            byte[] block = md.digest(input);
             float[] vec = new float[dimension];
             double sumSq = 0.0;
             for (int i = 0; i < dimension; i++) {
-                byte b = seed[i % seed.length];
+                if (i > 0 && i % block.length == 0) {
+                    block = md.digest(block);
+                }
+                byte b = block[i % block.length];
                 float val = ((b & 0xFF) - 127.5f) / 127.5f;
                 vec[i] = val;
                 sumSq += val * val;

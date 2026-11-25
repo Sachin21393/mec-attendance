@@ -6,6 +6,7 @@ import com.example.attendance.auth.TokenHashUtil;
 import com.example.attendance.biometrics.BiometricEncryptionService;
 import com.example.attendance.biometrics.BiometricsConfigController;
 import com.example.attendance.biometrics.FaceRecognitionProvider;
+import com.example.attendance.biometrics.ImagePayloadValidator;
 import com.example.attendance.biometrics.WorkerBiometric;
 import com.example.attendance.biometrics.WorkerBiometricRepository;
 import com.example.attendance.common.AppException;
@@ -19,7 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.Map;
 import java.util.UUID;
 
@@ -33,6 +33,7 @@ public class WorkerOnboardingService {
     private final WorkerSessionRepository sessionRepository;
     private final FaceRecognitionProvider faceProvider;
     private final BiometricEncryptionService encryptionService;
+    private final ImagePayloadValidator imageValidator;
     private final AttendanceProperties properties;
     private final AuditService auditService;
 
@@ -44,6 +45,7 @@ public class WorkerOnboardingService {
             WorkerSessionRepository sessionRepository,
             FaceRecognitionProvider faceProvider,
             BiometricEncryptionService encryptionService,
+            ImagePayloadValidator imageValidator,
             AttendanceProperties properties,
             AuditService auditService
     ) {
@@ -54,6 +56,7 @@ public class WorkerOnboardingService {
         this.sessionRepository = sessionRepository;
         this.faceProvider = faceProvider;
         this.encryptionService = encryptionService;
+        this.imageValidator = imageValidator;
         this.properties = properties;
         this.auditService = auditService;
     }
@@ -162,7 +165,7 @@ public class WorkerOnboardingService {
             );
         }
 
-        byte[] imageBytes = decodeImagePayload(imageBase64);
+        byte[] imageBytes = imageValidator.decodeBase64(imageBase64);
         FaceRecognitionProvider.ExtractionResult extraction = faceProvider.extractEmbedding(imageBytes);
         BiometricEncryptionService.EncryptedTemplate encrypted = encryptionService.encrypt(extraction.embedding());
 
@@ -217,27 +220,6 @@ public class WorkerOnboardingService {
         );
 
         return new RegistrationOutcome(worker, rawSessionToken, ttl, faceProvider.isMock());
-    }
-
-    private byte[] decodeImagePayload(String imageBase64) {
-        if (imageBase64 == null || imageBase64.isBlank()) {
-            throw new ValidationException("BIOMETRIC_IMAGE_REQUIRED", "A face image capture is required.");
-        }
-        String payload = imageBase64.trim();
-        int commaIdx = payload.indexOf(',');
-        if (payload.startsWith("data:") && commaIdx > 0) {
-            payload = payload.substring(commaIdx + 1);
-        }
-        byte[] bytes;
-        try {
-            bytes = Base64.getDecoder().decode(payload);
-        } catch (IllegalArgumentException e) {
-            throw new ValidationException("BIOMETRIC_IMAGE_INVALID", "Face capture payload is not valid base64.");
-        }
-        if (bytes.length > properties.getBiometrics().getMaxImageBytes()) {
-            throw new AppException("PAYLOAD_TOO_LARGE", "Face image exceeds maximum allowed size.", HttpStatus.PAYLOAD_TOO_LARGE);
-        }
-        return bytes;
     }
 
     private static String normalizeCode(String rawCode) {

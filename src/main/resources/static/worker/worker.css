@@ -104,10 +104,36 @@
 
 .face-oval {
   position: absolute;
-  inset: 14% 18%;
-  border: 3px dashed rgba(255, 255, 255, 0.85);
-  border-radius: 50%;
+  inset: 10% 16%;
   pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.face-mesh-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.scan-beam {
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #3478F6, transparent);
+  opacity: 0;
+}
+
+.camera-frame-wrap.scanning .scan-beam {
+  opacity: 1;
+  animation: scanSweep 1.6s ease-in-out infinite;
+}
+
+@keyframes scanSweep {
+  0% { top: 15%; }
+  50% { top: 82%; }
+  100% { top: 15%; }
 }
 
 .camera-placeholder {

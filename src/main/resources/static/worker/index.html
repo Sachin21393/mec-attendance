@@ -106,7 +106,13 @@
 
         <div class="camera-frame-wrap">
           <video id="camera-video" autoplay playsinline muted></video>
-          <div class="face-oval" aria-hidden="true"></div>
+          <div id="face-oval" class="face-oval" aria-hidden="true">
+            <svg viewBox="0 0 200 260" class="face-mesh-svg">
+              <ellipse cx="100" cy="130" rx="82" ry="110" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="2.5" stroke-dasharray="8 6"/>
+              <path d="M55 105 Q100 90 145 105 M70 135 Q100 145 130 135 M80 175 Q100 188 120 175" fill="none" stroke="rgba(52,120,246,0.55)" stroke-width="1.5"/>
+            </svg>
+            <div class="scan-beam"></div>
+          </div>
           <div id="camera-placeholder" class="camera-placeholder" hidden>
             <p class="helper-text">Camera unavailable or permission denied.</p>
           </div>
