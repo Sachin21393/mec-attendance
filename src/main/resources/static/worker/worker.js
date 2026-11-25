@@ -74,7 +74,9 @@ async function startCamera() {
       audio: false
     });
     state.stream = stream;
-    document.getElementById('camera-video').srcObject = stream;
+    const video = document.getElementById('camera-video');
+    video.srcObject = stream;
+    await video.play().catch(() => {});
   } catch (err) {
     placeholder.hidden = false;
     if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
