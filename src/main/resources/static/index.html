@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Workforce Attendance</title>
+  <link rel="stylesheet" href="/shared/styles.css">
+  <style>
+    .portal-shell {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .portal-card {
+      width: 100%;
+      max-width: 440px;
+      text-align: center;
+    }
+    .portal-brand {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      background: var(--btn-primary-bg);
+      color: #fff;
+      font-weight: 700;
+      font-size: 1.25rem;
+      margin-bottom: 16px;
+    }
+    .portal-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 24px;
+    }
+  </style>
+</head>
+<body>
+  <main class="portal-shell">
+    <section class="card portal-card">
+      <div class="portal-brand" aria-hidden="true">WA</div>
+      <h1 style="margin: 0 0 8px;">Workforce Attendance</h1>
+      <p class="helper-text">Choose your workspace to continue.</p>
+      <div class="portal-actions">
+        <a class="btn btn-primary btn-block" href="/worker/">Worker Attendance App</a>
+        <a class="btn btn-secondary btn-block" href="/admin/">Admin Dashboard</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

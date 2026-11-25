@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Workforce Attendance — Worker</title>
+  <link rel="stylesheet" href="/shared/styles.css">
+  <link rel="stylesheet" href="/worker/worker.css">
+</head>
+<body>
+  <div class="worker-shell">
+    <header class="worker-header">
+      <div class="worker-brand">
+        <span class="worker-logo" aria-hidden="true">WA</span>
+        <div>
+          <h1 class="worker-title">Workforce Attendance</h1>
+          <p id="mock-mode-badge" class="mock-pill" hidden>[MOCK BIOMETRICS] Dev mode</p>
+        </div>
+      </div>
+    </header>
+
+    <main id="worker-main" class="worker-main" aria-live="polite">
+      <section id="view-loading" class="card">
+        <p class="helper-text">Checking your session...</p>
+      </section>
+
+      <!-- First Launch -->
+      <section id="view-welcome" class="card" hidden>
+        <h2 class="section-heading">Welcome</h2>
+        <p class="helper-text" style="margin-bottom: 24px;">
+          Register once to mark your daily attendance.
+        </p>
+        <button id="btn-start-register" type="button" class="btn btn-primary btn-block">
+          Register
+        </button>
+      </section>
+
+      <!-- Step 1: Invitation Code -->
+      <section id="view-invite" class="card" hidden>
+        <h2 class="section-heading">Enter your worker code</h2>
+        <p class="helper-text" style="margin-bottom: 16px;">
+          Enter the one-time invitation code given by your administrator.
+        </p>
+        <div id="invite-error" class="banner banner-error" hidden></div>
+        <form id="form-invite">
+          <div class="field">
+            <label for="input-invite-code">Invitation code</label>
+            <input id="input-invite-code" class="input" type="text" autocomplete="off"
+                   placeholder="e.g. JOIN-W009-DEMO" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block">Continue</button>
+          <button id="btn-invite-back" type="button" class="btn btn-ghost btn-block" style="margin-top: 8px;">Back</button>
+        </form>
+      </section>
+
+      <!-- Step 2: Name & Consent -->
+      <section id="view-consent" class="card" hidden>
+        <h2 class="section-heading">Confirm details &amp; consent</h2>
+        <p id="invite-worker-meta" class="helper-text" style="margin-bottom: 16px;"></p>
+        <div id="consent-error" class="banner banner-error" hidden></div>
+        <div class="field">
+          <label for="input-full-name">Your full name</label>
+          <div class="name-input-row">
+            <input id="input-full-name" class="input" type="text" maxlength="160" required>
+            <button id="btn-voice-name" type="button" class="btn btn-secondary" hidden aria-label="Speak your name">
+              Voice
+            </button>
+          </div>
+          <p class="helper-text">You can always type or edit your name.</p>
+        </div>
+
+        <div class="consent-box">
+          <h3 style="margin: 0 0 8px; font-size: 0.95rem;">Face Attendance Privacy Notice</h3>
+          <p id="consent-notice-text" class="helper-text"></p>
+        </div>
+
+        <label class="checkbox-row">
+          <input id="checkbox-consent" type="checkbox">
+          <span>I agree to create a face template for daily attendance.</span>
+        </label>
+
+        <button id="btn-consent-continue" type="button" class="btn btn-primary btn-block">
+          Open camera &amp; capture face
+        </button>
+        <button id="btn-decline-consent" type="button" class="btn btn-secondary btn-block" style="margin-top: 8px;">
+          I prefer manual attendance
+        </button>
+      </section>
+
+      <!-- Manual fallback view -->
+      <section id="view-manual-fallback" class="card" hidden>
+        <h2 class="section-heading">Manual attendance option</h2>
+        <p id="manual-guidance-text" class="helper-text" style="margin-bottom: 20px;">
+          You chose not to enroll face recognition. Please contact your site supervisor or administrator to mark attendance manually.
+        </p>
+        <button id="btn-manual-back" type="button" class="btn btn-secondary btn-block">Back to start</button>
+      </section>
+
+      <!-- Step 3: Face Capture for Registration -->
+      <section id="view-camera" class="card" hidden>
+        <h2 class="section-heading">Take your registration photo</h2>
+        <p class="helper-text" style="margin-bottom: 12px;">
+          Place your face inside the frame in good lighting. Keep only one face in frame.
+        </p>
+        <div id="camera-error" class="banner banner-error" hidden></div>
+
+        <div class="camera-frame-wrap">
+          <video id="camera-video" autoplay playsinline muted></video>
+          <div class="face-oval" aria-hidden="true"></div>
+          <div id="camera-placeholder" class="camera-placeholder" hidden>
+            <p class="helper-text">Camera unavailable or permission denied.</p>
+          </div>
+        </div>
+        <canvas id="camera-canvas" hidden></canvas>
+
+        <div class="camera-actions">
+          <button id="btn-capture-register" type="button" class="btn btn-primary btn-block">
+            Capture &amp; Complete Registration
+          </button>
+          <button id="btn-retry-camera" type="button" class="btn btn-secondary btn-block">
+            Retry Camera
+          </button>
+          <button id="btn-mock-capture" type="button" class="btn btn-secondary btn-block" hidden>
+            Use Synthetic Dev Frame (Mock Mode)
+          </button>
+          <button id="btn-camera-cancel" type="button" class="btn btn-ghost btn-block">
+            Cancel
+          </button>
+        </div>
+      </section>
+
+      <!-- Registration Success / Returning Worker -->
+      <section id="view-home" class="card" hidden>
+        <div id="reg-success-banner" class="banner banner-success" hidden>
+          Registration complete! Next time you open this app, you can mark attendance with one tap.
+        </div>
+        <h2 id="home-greeting" class="section-heading">Hello</h2>
+        <p id="home-worker-meta" class="helper-text" style="margin-bottom: 20px;"></p>
+
+        <button id="btn-mark-attendance" type="button" class="btn btn-primary btn-block" disabled>
+          Mark your attendance (Available in PR 4)
+        </button>
+
+        <div class="home-secondary-actions">
+          <button id="btn-switch-worker" type="button" class="btn btn-ghost btn-block">
+            This isn't me
+          </button>
+          <button id="btn-revoke-device" type="button" class="btn btn-ghost btn-block">
+            Revoke this device session
+          </button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="/worker/worker.js"></script>
+</body>
+</html>
