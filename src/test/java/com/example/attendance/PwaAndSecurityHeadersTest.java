@@ -62,7 +62,12 @@ class PwaAndSecurityHeadersTest {
 
         mockMvc.perform(get("/assets/icon-192.png")).andExpect(status().isOk());
         mockMvc.perform(get("/assets/icon-512.png")).andExpect(status().isOk());
+        mockMvc.perform(get("/")).andExpect(status().isOk());
+        mockMvc.perform(get("/worker")).andExpect(status().isOk());
+        mockMvc.perform(get("/worker/")).andExpect(status().isOk());
         mockMvc.perform(get("/worker/index.html")).andExpect(status().isOk());
+        mockMvc.perform(get("/admin")).andExpect(status().isOk());
+        mockMvc.perform(get("/admin/")).andExpect(status().isOk());
         mockMvc.perform(get("/admin/index.html")).andExpect(status().isOk());
     }
 
