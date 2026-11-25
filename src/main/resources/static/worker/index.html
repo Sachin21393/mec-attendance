@@ -124,6 +124,13 @@
           Mark your attendance
         </button>
 
+        <div id="proxy-action-wrap" style="margin-top: 12px;" hidden>
+          <button id="btn-mark-proxy" type="button" class="btn btn-secondary btn-block">
+            Mark attendance for another worker
+          </button>
+          <p id="proxy-quota-note" class="helper-text" style="margin-top: 6px; text-align: center;"></p>
+        </div>
+
         <div class="home-secondary-actions">
           <button id="btn-switch-worker" type="button" class="btn btn-ghost btn-block">
             This isn&apos;t me
@@ -141,6 +148,12 @@
           Keep your face still for a moment in good lighting. Keep only one face in frame.
         </p>
         <div id="camera-error" class="banner banner-error" hidden></div>
+
+        <div id="proxy-target-wrap" class="field" hidden>
+          <label for="input-proxy-target-code">Colleague worker code (optional)</label>
+          <input id="input-proxy-target-code" class="input" type="text" autocomplete="off"
+                 placeholder="Leave blank to match by face, e.g. W002">
+        </div>
 
         <div id="camera-frame-wrap" class="camera-frame-wrap">
           <video id="camera-video" autoplay playsinline muted></video>
@@ -171,6 +184,21 @@
             Cancel
           </button>
         </div>
+      </section>
+
+      <!-- Proxy Explicit Confirmation -->
+      <section id="view-proxy-confirm" class="card" hidden>
+        <h2 class="section-heading">Confirm colleague attendance</h2>
+        <p id="proxy-confirm-question" style="font-size: 1.0625rem; font-weight: 600; margin: 12px 0 20px;">
+          You are marking attendance for worker. Continue?
+        </p>
+        <div id="proxy-confirm-error" class="banner banner-error" hidden></div>
+        <button id="btn-proxy-confirm-submit" type="button" class="btn btn-primary btn-block">
+          Confirm &amp; Mark Attendance
+        </button>
+        <button id="btn-proxy-confirm-cancel" type="button" class="btn btn-secondary btn-block" style="margin-top: 8px;">
+          Cancel
+        </button>
       </section>
 
       <!-- Attendance Confirmation / Failure Result Card -->

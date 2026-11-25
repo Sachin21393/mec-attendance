@@ -73,6 +73,10 @@ public class AttendanceCheckInService {
         WorkCalendarDay calDay = calendarRepository.findByCalendarDate(attendanceDate).orElse(null);
         AttendanceCalculator.EffectiveDayConfig dayConfig = calculator.resolveDayConfig(attendanceDate, calDay, settings);
 
+        long proxyUsedToday = attendanceRepository.countByActorWorkerIdAndAttendanceDateAndAttendanceMethod(
+                workerId, attendanceDate, AttendanceMethod.PROXY);
+        int maxProxy = settings.isProxyEnabled() ? settings.getMaxProxyPerActorPerDay() : 0;
+
         Optional<AttendanceRecord> existingOpt = attendanceRepository.findBySubjectWorkerIdAndAttendanceDate(workerId, attendanceDate);
         if (existingOpt.isEmpty()) {
             return new TodayStatusResponse(
@@ -82,6 +86,8 @@ public class AttendanceCheckInService {
                     dayConfig.shiftStartLocal().toString(),
                     dayConfig.gracePeriodMinutes(),
                     settings.isProxyEnabled(),
+                    maxProxy,
+                    (int) proxyUsedToday,
                     false,
                     null,
                     null,
@@ -103,6 +109,8 @@ public class AttendanceCheckInService {
                 dayConfig.shiftStartLocal().toString(),
                 dayConfig.gracePeriodMinutes(),
                 settings.isProxyEnabled(),
+                maxProxy,
+                (int) proxyUsedToday,
                 true,
                 rec.getId(),
                 rec.getAttendanceStatus(),
@@ -197,12 +205,6 @@ public class AttendanceCheckInService {
         AttendanceMethod method = "PROXY".equalsIgnoreCase(bioToken.getVerificationMode())
                 ? AttendanceMethod.PROXY
                 : AttendanceMethod.SELF;
-        if (method == AttendanceMethod.PROXY) {
-            throw new ValidationException("PROXY_NOT_ENABLED_YET", "Proxy attendance submission is handled via proxy check-in.");
-        }
-
-        Worker subject = workerRepository.findById(bioToken.getSubjectWorkerId())
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Subject worker not found."));
 
         AttendanceSettings settings = loadSettings();
         LocalDate attendanceDate = calculator.resolveAttendanceDate(now, settings);
@@ -216,18 +218,64 @@ public class AttendanceCheckInService {
             );
         }
 
+        Worker subject;
+        if (method == AttendanceMethod.PROXY) {
+            if (!settings.isProxyEnabled()) {
+                throw new ForbiddenException("PROXY_DISABLED", "Marking attendance for another worker is disabled by policy.");
+            }
+            if (bioToken.getSubjectWorkerId().equals(actor.getId())) {
+                throw new ValidationException("SELF_PROXY_NOT_ALLOWED", "Use regular self check-in for your own attendance.");
+            }
+            // Serialize concurrent proxy attempts by locking the actor worker row
+            workerRepository.findByIdForUpdate(actor.getId())
+                    .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Actor worker not found."));
+            long usedProxyToday = attendanceRepository.countByActorWorkerIdAndAttendanceDateAndAttendanceMethod(
+                    actor.getId(), attendanceDate, AttendanceMethod.PROXY);
+            if (usedProxyToday >= settings.getMaxProxyPerActorPerDay()) {
+                auditService.recordIndependent(
+                        "ATTENDANCE_PROXY_CAP_REACHED",
+                        AuditActorType.WORKER,
+                        actor.getId(),
+                        bioToken.getSubjectWorkerId(),
+                        Map.of(
+                                "attendanceDate", attendanceDate.toString(),
+                                "usedProxyToday", usedProxyToday,
+                                "maxProxyPerDay", settings.getMaxProxyPerActorPerDay()
+                        )
+                );
+                throw new ForbiddenException(
+                        "PROXY_LIMIT_REACHED",
+                        "You have reached the daily limit (" + settings.getMaxProxyPerActorPerDay() + ") for marking attendance for another worker."
+                );
+            }
+            subject = workerRepository.findById(bioToken.getSubjectWorkerId())
+                    .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Subject worker not found."));
+            if (subject.getStatus() != WorkerStatus.REGISTERED) {
+                throw new ForbiddenException("TARGET_WORKER_NOT_ACTIVE", "Target worker account is not active.");
+            }
+        } else {
+            if (!bioToken.getSubjectWorkerId().equals(actor.getId())) {
+                throw new ForbiddenException("VERIFICATION_SUBJECT_MISMATCH", "Verification token does not match the signed-in worker.");
+            }
+            subject = actor;
+        }
+
         Optional<AttendanceRecord> alreadyMarked = attendanceRepository.findBySubjectWorkerIdAndAttendanceDate(subject.getId(), attendanceDate);
         if (alreadyMarked.isPresent()) {
             String timeStr = calculator.formatLocalTime(alreadyMarked.get().getCheckInAtUtc(), dayConfig.timezone());
-            throw new ConflictException(
-                    "ALREADY_MARKED",
-                    "You have already marked attendance today at " + timeStr
-            );
+            String msg = method == AttendanceMethod.PROXY
+                    ? subject.getFullName() + " has already marked attendance today at " + timeStr
+                    : "You have already marked attendance today at " + timeStr;
+            throw new ConflictException("ALREADY_MARKED", msg);
         }
 
         AttendanceStatus status = calculator.evaluateCheckInStatus(now, dayConfig);
         bioToken.setConsumedAtUtc(now);
         verificationTokenRepository.save(bioToken);
+
+        String note = method == AttendanceMethod.PROXY
+                ? "Marked on behalf by " + actor.getWorkerCode() + (bioToken.isMockMode() ? " (Mock biometrics mode)" : "")
+                : (bioToken.isMockMode() ? "Mock biometrics mode" : null);
 
         AttendanceRecord record = new AttendanceRecord(
                 UUID.randomUUID(),
@@ -236,11 +284,11 @@ public class AttendanceCheckInService {
                 attendanceDate,
                 now,
                 status,
-                AttendanceMethod.SELF,
+                method,
                 cleanIdemKey,
                 bioToken.getMatchConfidence(),
                 sessionId,
-                bioToken.isMockMode() ? "Mock biometrics mode" : null,
+                note,
                 now
         );
 
@@ -251,14 +299,16 @@ public class AttendanceCheckInService {
         }
 
         auditService.record(
-                "ATTENDANCE_SELF_RECORDED",
+                method == AttendanceMethod.PROXY ? "ATTENDANCE_PROXY_RECORDED" : "ATTENDANCE_SELF_RECORDED",
                 AuditActorType.WORKER,
                 actor.getId(),
                 subject.getId(),
                 Map.of(
                         "attendanceDate", attendanceDate.toString(),
                         "status", status.name(),
-                        "method", AttendanceMethod.SELF.name(),
+                        "method", method.name(),
+                        "actorWorkerCode", actor.getWorkerCode(),
+                        "subjectWorkerCode", subject.getWorkerCode(),
                         "mockMode", bioToken.isMockMode()
                 )
         );
@@ -275,7 +325,7 @@ public class AttendanceCheckInService {
                 calculator.formatLocalTime(now, dayConfig.timezone()),
                 dayConfig.timezone().getId(),
                 status,
-                AttendanceMethod.SELF,
+                method,
                 false
         );
     }
@@ -292,6 +342,8 @@ public class AttendanceCheckInService {
             String shiftStartLocal,
             int gracePeriodMinutes,
             boolean proxyEnabled,
+            int maxProxyPerDay,
+            int proxyUsedToday,
             boolean alreadyMarked,
             UUID recordId,
             AttendanceStatus attendanceStatus,

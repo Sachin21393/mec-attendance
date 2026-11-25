@@ -171,6 +171,16 @@ public class BiometricsVerificationService {
             return matchSpecificWorker(requested, probeEmbedding, threshold);
         }
 
+        // Reject self-proxy explicitly even if no targetWorkerCode was supplied
+        var actorBioOpt = biometricRepository.findByWorkerId(actor.getId());
+        if (actorBioOpt.isPresent()) {
+            WorkerBiometric actorBio = actorBioOpt.get();
+            float[] actorRef = encryptionService.decrypt(actorBio.getEncryptedEmbedding(), actorBio.getEncryptionIv());
+            if (faceProvider.cosineSimilarity(probeEmbedding, actorRef) >= threshold) {
+                throw new ValidationException("SELF_PROXY_NOT_ALLOWED", "Use regular self check-in for your own attendance.");
+            }
+        }
+
         // Identify matching registered worker excluding actor
         List<Worker> registered = workerRepository.findByStatusOrderByWorkerCodeAsc(WorkerStatus.REGISTERED);
         MatchCandidate best = null;

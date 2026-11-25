@@ -8,6 +8,7 @@ const views = {
   manual: document.getElementById('view-manual-fallback'),
   home: document.getElementById('view-home'),
   camera: document.getElementById('view-camera'),
+  proxyConfirm: document.getElementById('view-proxy-confirm'),
   result: document.getElementById('view-result')
 };
 
@@ -15,13 +16,14 @@ const state = {
   biometricsConfig: null,
   worker: null,
   today: null,
-  cameraMode: 'register', // 'register' | 'self'
+  cameraMode: 'register', // 'register' | 'self' | 'proxy'
   invitationCode: '',
   consentVersion: '',
   fullName: '',
   stream: null,
   busy: false,
-  pendingIdempotencyKey: null
+  pendingIdempotencyKey: null,
+  pendingProxyVerify: null
 };
 
 function showView(name) {
@@ -42,8 +44,7 @@ function setBanner(id, message) {
 }
 
 function setScanning(active) {
-  const wrap = document.getElementById('camera-frame-wrap');
-  wrap.classList.toggle('scanning', active);
+  document.getElementById('camera-frame-wrap').classList.toggle('scanning', active);
 }
 
 function stopCamera() {
@@ -52,8 +53,7 @@ function stopCamera() {
     state.stream.getTracks().forEach((t) => t.stop());
     state.stream = null;
   }
-  const video = document.getElementById('camera-video');
-  video.srcObject = null;
+  document.getElementById('camera-video').srcObject = null;
 }
 
 async function startCamera() {
@@ -74,8 +74,7 @@ async function startCamera() {
       audio: false
     });
     state.stream = stream;
-    const video = document.getElementById('camera-video');
-    video.srcObject = stream;
+    document.getElementById('camera-video').srcObject = stream;
   } catch (err) {
     placeholder.hidden = false;
     if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
@@ -102,6 +101,10 @@ function captureCanvasBase64() {
 function buildSyntheticMockPayload() {
   if (state.cameraMode === 'register') {
     return btoa(`MOCK_FACE_${state.invitationCode}`);
+  }
+  if (state.cameraMode === 'proxy') {
+    const targetCode = document.getElementById('input-proxy-target-code').value.trim().toUpperCase() || 'W001';
+    return btoa(`MOCK_FACE_${targetCode}`);
   }
   return btoa(`MOCK_FACE_${state.worker.workerCode}`);
 }
@@ -155,6 +158,20 @@ function renderTodayStatus(today) {
     markBtn.disabled = false;
     markBtn.textContent = 'Mark your attendance';
   }
+
+  const proxyWrap = document.getElementById('proxy-action-wrap');
+  const proxyBtn = document.getElementById('btn-mark-proxy');
+  const proxyNote = document.getElementById('proxy-quota-note');
+  if (today.proxyEnabled && today.dayType === 'WORKING') {
+    proxyWrap.hidden = false;
+    const remaining = Math.max(0, (today.maxProxyPerDay || 0) - (today.proxyUsedToday || 0));
+    proxyBtn.disabled = remaining === 0;
+    proxyNote.textContent = remaining > 0
+      ? `The other worker must be present (${remaining} of ${today.maxProxyPerDay} remaining today).`
+      : `Daily limit reached (${today.proxyUsedToday} of ${today.maxProxyPerDay} used today).`;
+  } else {
+    proxyWrap.hidden = true;
+  }
 }
 
 async function refreshHome(justRegistered = false) {
@@ -170,22 +187,30 @@ async function refreshHome(justRegistered = false) {
     const today = await apiFetch('/api/v1/attendance/today');
     renderTodayStatus(today);
   } catch {
-    // Keep home rendered even if offline
+    // Keep home rendered if offline
   }
   showView('home');
 }
 
 function openCameraView(mode) {
   state.cameraMode = mode;
-  state.pendingIdempotencyKey = mode === 'self' ? crypto.randomUUID() : null;
+  state.pendingProxyVerify = null;
+  state.pendingIdempotencyKey = (mode === 'self' || mode === 'proxy') ? crypto.randomUUID() : null;
+
   const heading = document.getElementById('camera-heading');
   const guidance = document.getElementById('camera-guidance');
   const actionBtn = document.getElementById('btn-capture-action');
+  const proxyTargetWrap = document.getElementById('proxy-target-wrap');
 
+  proxyTargetWrap.hidden = mode !== 'proxy';
   if (mode === 'register') {
     heading.textContent = 'Take your registration photo';
     guidance.textContent = 'Place your face inside the frame in good lighting. Keep only one face in frame.';
     actionBtn.textContent = 'Capture & Complete Registration';
+  } else if (mode === 'proxy') {
+    heading.textContent = 'Ask the worker to face the camera';
+    guidance.textContent = 'The other worker must be physically present for face verification.';
+    actionBtn.textContent = 'Verify Worker Face';
   } else {
     heading.textContent = 'Place your face inside the frame';
     guidance.textContent = 'Keep your face still for a moment in good lighting.';
@@ -202,9 +227,14 @@ function showAttendanceSuccess(data) {
   icon.className = 'result-icon result-icon-success';
   icon.innerHTML = '&#10003;';
   document.getElementById('result-title').textContent = 'Attendance marked successfully';
-  document.getElementById('result-subtitle').textContent = state.biometricsConfig?.mockMode
-    ? 'Recorded in development mock-biometrics mode.'
-    : 'Your daily attendance has been recorded.';
+  if (data.attendanceMethod === 'PROXY') {
+    document.getElementById('result-subtitle').textContent =
+      `Attendance recorded for ${data.subjectWorkerName} by ${data.actorWorkerName}.`;
+  } else {
+    document.getElementById('result-subtitle').textContent = state.biometricsConfig?.mockMode
+      ? 'Recorded in development mock-biometrics mode.'
+      : 'Your daily attendance has been recorded.';
+  }
   document.getElementById('result-details').hidden = false;
   document.getElementById('result-worker-name').textContent = `${data.subjectWorkerName} (${data.subjectWorkerCode})`;
   document.getElementById('result-date').textContent = data.attendanceDate;
@@ -234,7 +264,7 @@ async function handleCameraCapture(imageBase64) {
     return;
   }
   if (!navigator.onLine) {
-    if (state.cameraMode === 'self') {
+    if (state.cameraMode !== 'register') {
       showAttendanceFailure("You're offline. Your attendance has not been recorded.", true);
     } else {
       setBanner('camera-error', "You're offline. Please connect to the internet and try again.");
@@ -266,14 +296,28 @@ async function handleCameraCapture(imageBase64) {
       });
       state.worker = result;
       await refreshHome(true);
+    } else if (state.cameraMode === 'proxy') {
+      document.getElementById('camera-guidance').textContent = 'Verifying your face...';
+      const targetWorkerCode = document.getElementById('input-proxy-target-code').value.trim() || null;
+      const verify = await apiFetch('/api/v1/biometrics/verify', {
+        method: 'POST',
+        body: {
+          mode: 'PROXY',
+          targetWorkerCode,
+          imageBase64
+        }
+      });
+      stopCamera();
+      state.pendingProxyVerify = verify;
+      setBanner('proxy-confirm-error', '');
+      document.getElementById('proxy-confirm-question').textContent =
+        `You are marking attendance for ${verify.matchedWorkerName} (${verify.matchedWorkerCode}). Continue?`;
+      showView('proxyConfirm');
     } else {
       document.getElementById('camera-guidance').textContent = 'Verifying your face...';
       const verify = await apiFetch('/api/v1/biometrics/verify', {
         method: 'POST',
-        body: {
-          mode: 'SELF',
-          imageBase64
-        }
+        body: { mode: 'SELF', imageBase64 }
       });
       const checkIn = await apiFetch('/api/v1/attendance/check-in', {
         method: 'POST',
@@ -293,12 +337,42 @@ async function handleCameraCapture(imageBase64) {
       showAttendanceFailure(err.message, false);
     } else {
       setBanner('camera-error', err.message || "We couldn't verify your face. Please try again in better lighting.");
-      document.getElementById('camera-guidance').textContent = 'Place your face inside the frame and try again.';
+      document.getElementById('camera-guidance').textContent = 'Place face inside the frame and try again.';
     }
   } finally {
     state.busy = false;
     actionBtn.disabled = false;
     mockBtn.disabled = false;
+  }
+}
+
+async function submitProxyConfirmation() {
+  if (!state.pendingProxyVerify || state.busy) {
+    return;
+  }
+  state.busy = true;
+  const confirmBtn = document.getElementById('btn-proxy-confirm-submit');
+  confirmBtn.disabled = true;
+  setBanner('proxy-confirm-error', '');
+  try {
+    const checkIn = await apiFetch('/api/v1/attendance/check-in', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': state.pendingIdempotencyKey },
+      body: {
+        verificationToken: state.pendingProxyVerify.verificationToken,
+        idempotencyKey: state.pendingIdempotencyKey
+      }
+    });
+    showAttendanceSuccess(checkIn);
+  } catch (err) {
+    if (err instanceof ApiError && (err.code === 'ALREADY_MARKED' || err.code === 'PROXY_LIMIT_REACHED')) {
+      showAttendanceFailure(err.message, false);
+    } else {
+      setBanner('proxy-confirm-error', err.message || 'Could not record proxy attendance.');
+    }
+  } finally {
+    state.busy = false;
+    confirmBtn.disabled = false;
   }
 }
 
@@ -397,12 +471,21 @@ document.getElementById('btn-decline-consent').addEventListener('click', async (
 });
 
 document.getElementById('btn-manual-back').addEventListener('click', () => showView('welcome'));
+
 document.getElementById('btn-mark-attendance').addEventListener('click', () => {
   if (!navigator.onLine) {
     showAttendanceFailure("You're offline. Your attendance has not been recorded.", true);
     return;
   }
   openCameraView('self');
+});
+
+document.getElementById('btn-mark-proxy').addEventListener('click', () => {
+  if (!navigator.onLine) {
+    showAttendanceFailure("You're offline. Your attendance has not been recorded.", true);
+    return;
+  }
+  openCameraView('proxy');
 });
 
 document.getElementById('btn-retry-camera').addEventListener('click', startCamera);
@@ -428,7 +511,10 @@ document.getElementById('btn-mock-capture').addEventListener('click', async () =
   await handleCameraCapture(buildSyntheticMockPayload());
 });
 
-document.getElementById('btn-result-retry').addEventListener('click', () => openCameraView('self'));
+document.getElementById('btn-proxy-confirm-submit').addEventListener('click', submitProxyConfirmation);
+document.getElementById('btn-proxy-confirm-cancel').addEventListener('click', () => refreshHome(false));
+
+document.getElementById('btn-result-retry').addEventListener('click', () => openCameraView(state.cameraMode));
 document.getElementById('btn-result-done').addEventListener('click', () => refreshHome(false));
 
 document.getElementById('btn-switch-worker').addEventListener('click', async () => {
