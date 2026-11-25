@@ -190,11 +190,43 @@
           </div>
         </section>
 
-        <!-- Placeholder tabs expanded in PR 7, 8, 9 -->
+        <!-- Reports & CSV Export -->
         <section id="tab-reports" class="tab-panel" hidden>
           <div class="card">
-            <h2>Reports / Export</h2>
-            <p class="helper-text">Month-wise CSV export and totals preview will be enabled in PR 8.</p>
+            <div class="toolbar">
+              <div>
+                <h2 style="margin: 0;">Monthly Reports &amp; CSV Export</h2>
+                <p id="reports-subtitle" class="helper-text">Preview monthly attendance totals before downloading UTF-8 CSV.</p>
+              </div>
+              <div class="toolbar-filters">
+                <input id="reports-search" class="input" type="search" placeholder="Filter worker name or code" style="max-width: 220px;">
+                <select id="reports-team-filter" class="select" style="max-width: 170px;">
+                  <option value="">All teams</option>
+                </select>
+                <button id="btn-download-csv" type="button" class="btn btn-primary">Download CSV</button>
+              </div>
+            </div>
+
+            <div id="reports-feedback" class="banner banner-success" hidden></div>
+
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Worker</th>
+                    <th>Team</th>
+                    <th>Working days</th>
+                    <th>Worked days</th>
+                    <th>On time</th>
+                    <th>Late</th>
+                    <th>Absent</th>
+                    <th>Holidays / Off</th>
+                  </tr>
+                </thead>
+                <tbody id="reports-tbody"></tbody>
+              </table>
+            </div>
           </div>
         </section>
 

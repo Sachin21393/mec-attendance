@@ -38,6 +38,8 @@ function showTab(tab) {
 
   if (tab === 'workers') {
     loadWorkersTable();
+  } else if (tab === 'reports') {
+    loadReportsPreview();
   } else if (tab === 'settings') {
     loadCalendarAndSettings();
   }
@@ -248,6 +250,90 @@ function shiftMonth(delta) {
   loadDashboardAndGrid();
   if (state.activeTab === 'settings') {
     loadCalendarAndSettings();
+  } else if (state.activeTab === 'reports') {
+    loadReportsPreview();
+  }
+}
+
+async function loadReportsPreview() {
+  setGlobalError('');
+  const query = document.getElementById('reports-search').value.trim();
+  const team = document.getElementById('reports-team-filter').value;
+  const tbody = document.getElementById('reports-tbody');
+  tbody.innerHTML = '<tr><td colspan="9" class="helper-text">Loading report preview...</td></tr>';
+
+  try {
+    const preview = await apiFetch(
+      `/api/v1/admin/reports/preview?month=${encodeURIComponent(state.month)}&query=${encodeURIComponent(query)}&team=${encodeURIComponent(team)}`
+    );
+    document.getElementById('reports-subtitle').textContent =
+      `${preview.month} (${preview.timezoneId}) · ${preview.configuredWorkingDays} configured working days`;
+
+    const teamSel = document.getElementById('reports-team-filter');
+    teamSel.innerHTML = '<option value="">All teams</option>';
+    preview.teams.forEach((t) => {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      if (t === team) opt.selected = true;
+      teamSel.appendChild(opt);
+    });
+
+    tbody.innerHTML = '';
+    if (preview.workers.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="9" class="helper-text">No matching workers found.</td></tr>';
+      return;
+    }
+    preview.workers.forEach((w) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${escapeHtml(w.workerCode)}</strong></td>
+        <td>${escapeHtml(w.fullName)}</td>
+        <td>${escapeHtml(w.teamName || '-')}</td>
+        <td>${w.applicableWorkingDays}</td>
+        <td><strong>${w.workedDays}</strong></td>
+        <td>${w.onTimeDays}</td>
+        <td>${w.lateDays}</td>
+        <td>${w.absentDays}</td>
+        <td>${w.holidayDays + w.weeklyOffDays}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    tbody.innerHTML = '';
+    setGlobalError(err.message || 'Could not load report preview.');
+  }
+}
+
+async function downloadCsvExport() {
+  const btn = document.getElementById('btn-download-csv');
+  const feedback = document.getElementById('reports-feedback');
+  feedback.hidden = true;
+  btn.disabled = true;
+  const query = document.getElementById('reports-search')?.value.trim() || state.query || '';
+  const team = document.getElementById('reports-team-filter')?.value || state.team || '';
+  const url = `/api/v1/admin/reports/attendance.csv?month=${encodeURIComponent(state.month)}&query=${encodeURIComponent(query)}&team=${encodeURIComponent(team)}`;
+
+  try {
+    const resp = await fetch(url, { method: 'GET', credentials: 'same-origin' });
+    if (!resp.ok) {
+      throw new Error(`Export failed (${resp.status})`);
+    }
+    const blob = await resp.blob();
+    const dlUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = dlUrl;
+    a.download = `attendance_${state.month}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(dlUrl);
+    feedback.textContent = `Downloaded attendance_${state.month}.csv`;
+    feedback.hidden = false;
+  } catch (err) {
+    setGlobalError(err.message || 'Could not download CSV export.');
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -386,6 +472,8 @@ document.getElementById('input-month').addEventListener('change', (e) => {
     loadDashboardAndGrid();
     if (state.activeTab === 'settings') {
       loadCalendarAndSettings();
+    } else if (state.activeTab === 'reports') {
+      loadReportsPreview();
     }
   }
 });
@@ -505,7 +593,17 @@ document.getElementById('btn-page-next').addEventListener('click', () => {
   loadDashboardAndGrid();
 });
 
-document.getElementById('btn-export-shortcut').addEventListener('click', () => showTab('reports'));
+document.getElementById('btn-export-shortcut').addEventListener('click', () => {
+  showTab('reports');
+});
+
+document.getElementById('btn-download-csv').addEventListener('click', downloadCsvExport);
+document.getElementById('reports-team-filter').addEventListener('change', loadReportsPreview);
+let reportsSearchTimer = null;
+document.getElementById('reports-search').addEventListener('input', () => {
+  clearTimeout(reportsSearchTimer);
+  reportsSearchTimer = setTimeout(loadReportsPreview, 250);
+});
 
 document.getElementById('btn-toggle-invite-form').addEventListener('click', () => {
   const form = document.getElementById('form-create-worker');
