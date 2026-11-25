@@ -376,8 +376,53 @@ async function submitProxyConfirmation() {
   }
 }
 
+function setupPwaInstallAndUpdates() {
+  let deferredPrompt = null;
+  const installBtn = document.getElementById('btn-install-pwa');
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    installBtn.hidden = false;
+  });
+
+  installBtn.addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    installBtn.hidden = true;
+  });
+
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (isIos && !isStandalone) {
+    document.getElementById('ios-install-tip').hidden = false;
+  }
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/service-worker.js').then((reg) => {
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            const banner = document.getElementById('sw-update-banner');
+            banner.hidden = false;
+            document.getElementById('btn-sw-refresh').onclick = () => {
+              newWorker.postMessage({ type: 'SKIP_WAITING' });
+              window.location.reload();
+            };
+          }
+        });
+      });
+    }).catch(() => {});
+  }
+}
+
 async function init() {
   setupVoiceInput();
+  setupPwaInstallAndUpdates();
 
   window.addEventListener('online', () => {
     document.getElementById('home-offline-banner').hidden = true;

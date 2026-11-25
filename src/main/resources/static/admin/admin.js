@@ -627,6 +627,16 @@ document.getElementById('btn-close-drawer').addEventListener('click', () => {
   document.getElementById('detail-drawer').hidden = true;
 });
 
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const drawer = document.getElementById('detail-drawer');
+    if (!drawer.hidden) {
+      drawer.hidden = true;
+    }
+    sidebar.classList.remove('open');
+  }
+});
+
 document.getElementById('input-month').addEventListener('change', (e) => {
   if (e.target.value) {
     state.month = e.target.value;

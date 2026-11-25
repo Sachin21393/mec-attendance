@@ -3,7 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#17191C">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Attendance">
   <title>Workforce Attendance — Worker</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/assets/icon-192.png">
   <link rel="stylesheet" href="/shared/styles.css">
   <link rel="stylesheet" href="/worker/worker.css">
 </head>
@@ -17,7 +24,21 @@
           <p id="mock-mode-badge" class="mock-pill" hidden>[MOCK BIOMETRICS] Dev mode</p>
         </div>
       </div>
+      <button id="btn-install-pwa" type="button" class="btn btn-secondary" style="min-height: 36px; padding: 6px 12px; font-size: 0.8125rem;" hidden>
+        Install App
+      </button>
     </header>
+
+    <div id="sw-update-banner" class="banner banner-info" hidden>
+      <span>A new version of the app is ready.</span>
+      <button id="btn-sw-refresh" type="button" class="btn btn-primary" style="min-height: 34px; padding: 4px 12px; font-size: 0.8125rem; margin-left: 8px;">
+        Refresh
+      </button>
+    </div>
+
+    <div id="ios-install-tip" class="banner banner-info" hidden>
+      Tip: On iPhone/iPad Safari, tap <strong>Share</strong> then <strong>Add to Home Screen</strong> to install this app.
+    </div>
 
     <main id="worker-main" class="worker-main" aria-live="polite">
       <section id="view-loading" class="card">
