@@ -16,5 +16,40 @@ services:
       timeout: 5s
       retries: 10
 
+  app:
+    build: .
+    container_name: attendance-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-attendance}
+      DB_USERNAME: ${POSTGRES_USER:-attendance}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-attendance_dev_pass}
+      BIOMETRICS_ENCRYPTION_KEY_B64: ${BIOMETRICS_ENCRYPTION_KEY_B64:-MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=}
+      ATTENDANCE_BIOMETRICS_PROVIDER: ${ATTENDANCE_BIOMETRICS_PROVIDER:-mock}
+      ATTENDANCE_PRODUCTION_BIOMETRICS_ENABLED: ${ATTENDANCE_PRODUCTION_BIOMETRICS_ENABLED:-false}
+      APP_COOKIE_SECURE: ${APP_COOKIE_SECURE:-false}
+      ADMIN_BOOTSTRAP_USERNAME: ${ADMIN_BOOTSTRAP_USERNAME:-admin}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-ChangeMeLocalDev123!}
+    ports:
+      - "8080:8080"
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
 volumes:
   attendance_pg_data:
+  caddy_data:
+  caddy_config:
