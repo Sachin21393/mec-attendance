@@ -42,6 +42,8 @@ function showTab(tab) {
     loadReportsPreview();
   } else if (tab === 'settings') {
     loadCalendarAndSettings();
+  } else if (tab === 'audit') {
+    loadAuditLog();
   }
 }
 
@@ -176,6 +178,8 @@ function renderGrid(grid) {
 
       if (cell.recordId) {
         btn.addEventListener('click', () => openDetailDrawer(cell.recordId));
+      } else if (cell.state === 'ABSENT' || cell.state === 'NOT_DUE') {
+        btn.addEventListener('click', () => openManualExceptionDrawer(row.workerId, row.fullName, row.workerCode, cell.date));
       } else {
         btn.disabled = true;
       }
@@ -204,6 +208,34 @@ async function openDetailDrawer(recordId) {
       <div class="detail-kv"><span>Method</span><strong>${escapeHtml(d.attendanceMethod)}</strong></div>
       <div class="detail-kv"><span>Recorded By</span><strong>${escapeHtml(d.actorWorkerName)}${d.actorWorkerCode ? ' (' + escapeHtml(d.actorWorkerCode) + ')' : ''}</strong></div>
       ${d.notes ? `<div class="detail-kv"><span>Notes</span><span>${escapeHtml(d.notes)}</span></div>` : ''}
+      <h3 style="margin: 20px 0 8px; font-size: 0.95rem;">Admin Correction (Audited)</h3>
+      <form id="form-correct-attendance" class="inline-form-card">
+        <div class="field">
+          <label for="corr-status">Updated status</label>
+          <select id="corr-status" class="select">
+            <option value="ON_TIME" ${d.attendanceStatus === 'ON_TIME' ? 'selected' : ''}>ON_TIME</option>
+            <option value="LATE" ${d.attendanceStatus === 'LATE' ? 'selected' : ''}>LATE</option>
+            <option value="MANUAL_REVIEW" ${d.attendanceStatus === 'MANUAL_REVIEW' ? 'selected' : ''}>MANUAL_REVIEW</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="corr-reason">Reason (required)</label>
+          <input id="corr-reason" class="input" type="text" required placeholder="Explain why this record is corrected">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Save Correction</button>
+      </form>
+
+      <h3 style="margin: 20px 0 8px; font-size: 0.95rem;">Correction History</h3>
+      <div>
+        ${(d.corrections || []).map((c) => `
+          <div style="padding: 8px 0; border-bottom: 1px solid var(--border-subtle); font-size: 0.8125rem;">
+            <strong>${escapeHtml(c.previousStatus || '-')} &rarr; ${escapeHtml(c.newStatus)}</strong><br>
+            <span>${escapeHtml(c.reason)}</span><br>
+            <span class="helper-text">${escapeHtml(c.createdAt)}</span>
+          </div>
+        `).join('') || '<p class="helper-text">No corrections recorded.</p>'}
+      </div>
+
       <h3 style="margin: 20px 0 8px; font-size: 0.95rem;">Recent Audit Events</h3>
       <div>
         ${(d.recentAudits || []).map((a) => `
@@ -214,16 +246,80 @@ async function openDetailDrawer(recordId) {
         `).join('') || '<p class="helper-text">No audit events recorded.</p>'}
       </div>
     `;
+
+    document.getElementById('form-correct-attendance').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      await apiFetch(`/api/v1/admin/attendance/${encodeURIComponent(recordId)}/correct`, {
+        method: 'POST',
+        body: {
+          newStatus: document.getElementById('corr-status').value,
+          reason: document.getElementById('corr-reason').value.trim()
+        }
+      });
+      await openDetailDrawer(recordId);
+      await loadDashboardAndGrid();
+    });
   } catch (err) {
     body.innerHTML = `<div class="banner banner-error">${escapeHtml(err.message || 'Failed to load details.')}</div>`;
   }
 }
 
+function openManualExceptionDrawer(workerId, fullName, workerCode, date) {
+  const drawer = document.getElementById('detail-drawer');
+  const body = document.getElementById('drawer-body');
+  drawer.hidden = false;
+  body.innerHTML = `
+    <p class="helper-text" style="margin-bottom: 12px;">
+      Record audited manual attendance when a worker cannot use face recognition (camera unavailable, disability, or consent fallback).
+    </p>
+    <div class="detail-kv"><span>Worker</span><strong>${escapeHtml(fullName)} (${escapeHtml(workerCode)})</strong></div>
+    <div class="detail-kv"><span>Date</span><strong>${escapeHtml(date)}</strong></div>
+    <form id="form-manual-exception" class="inline-form-card" style="margin-top: 16px;">
+      <div class="field">
+        <label for="man-status">Status</label>
+        <select id="man-status" class="select">
+          <option value="ON_TIME">ON_TIME</option>
+          <option value="LATE">LATE</option>
+          <option value="MANUAL_REVIEW">MANUAL_REVIEW</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="man-time">Check-in local time</label>
+        <input id="man-time" class="input" type="time" value="09:00">
+      </div>
+      <div class="field">
+        <label for="man-reason">Exception reason (required)</label>
+        <input id="man-reason" class="input" type="text" required placeholder="e.g. Camera hardware unavailable">
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Record Manual Attendance</button>
+    </form>
+  `;
+  document.getElementById('form-manual-exception').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const res = await apiFetch('/api/v1/admin/attendance/manual', {
+      method: 'POST',
+      body: {
+        workerId,
+        attendanceDate: date,
+        status: document.getElementById('man-status').value,
+        checkInLocalTime: document.getElementById('man-time').value,
+        reason: document.getElementById('man-reason').value.trim()
+      }
+    });
+    await openDetailDrawer(res.id);
+    await loadDashboardAndGrid();
+  });
+}
+
 async function loadWorkersTable() {
   const tbody = document.getElementById('workers-tbody');
-  tbody.innerHTML = '<tr><td colspan="5" class="helper-text">Loading workers...</td></tr>';
+  const query = document.getElementById('workers-search')?.value.trim() || '';
+  const status = document.getElementById('workers-status-filter')?.value || '';
+  tbody.innerHTML = '<tr><td colspan="7" class="helper-text">Loading workers...</td></tr>';
   try {
-    const page = await apiFetch('/api/v1/admin/workers?size=100');
+    const page = await apiFetch(
+      `/api/v1/admin/workers?size=100&query=${encodeURIComponent(query)}&status=${encodeURIComponent(status)}`
+    );
     tbody.innerHTML = '';
     page.content.forEach((w) => {
       const tr = document.createElement('tr');
@@ -232,12 +328,78 @@ async function loadWorkersTable() {
         <td>${escapeHtml(w.fullName)}</td>
         <td>${escapeHtml(w.teamName || '-')}</td>
         <td>${escapeHtml(w.status)}</td>
-        <td class="helper-text">Manage in PR 9</td>
+        <td>${w.biometricsEnrolled ? 'Enrolled' : 'Not enrolled'}</td>
+        <td>${w.activeSessions}</td>
+        <td>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-secondary btn-revoke-sess" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Revoke Sessions</button>
+            <button type="button" class="btn btn-secondary btn-reset-bio" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Reset Face</button>
+            ${w.status !== 'DISABLED' ? `<button type="button" class="btn btn-secondary btn-disable-w" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Disable</button>` : ''}
+          </div>
+        </td>
       `;
       tbody.appendChild(tr);
     });
+
+    tbody.querySelectorAll('.btn-revoke-sess').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        await apiFetch(`/api/v1/admin/workers/${btn.dataset.id}/sessions/revoke`, { method: 'POST' });
+        await loadWorkersTable();
+      });
+    });
+    tbody.querySelectorAll('.btn-reset-bio').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const res = await apiFetch(`/api/v1/admin/workers/${btn.dataset.id}/biometric-reset`, {
+          method: 'POST',
+          body: { reason: 'Admin biometric reset' }
+        });
+        const banner = document.getElementById('invite-created-banner');
+        banner.textContent = `Biometric template cleared for ${res.worker.workerCode}. New one-time invitation code: ${res.invitationCode}`;
+        banner.hidden = false;
+        await loadWorkersTable();
+      });
+    });
+    tbody.querySelectorAll('.btn-disable-w').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        await apiFetch(`/api/v1/admin/workers/${btn.dataset.id}/disable`, { method: 'POST' });
+        await loadWorkersTable();
+      });
+    });
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="5" class="banner banner-error">${escapeHtml(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="banner banner-error">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+let auditPage = 0;
+async function loadAuditLog() {
+  const tbody = document.getElementById('audit-tbody');
+  const eventType = document.getElementById('audit-event-type').value.trim();
+  const fromDate = document.getElementById('audit-from-date').value;
+  const toDate = document.getElementById('audit-to-date').value;
+  tbody.innerHTML = '<tr><td colspan="6" class="helper-text">Loading audit events...</td></tr>';
+  try {
+    const page = await apiFetch(
+      `/api/v1/admin/audit-events?page=${auditPage}&size=25&eventType=${encodeURIComponent(eventType)}&fromDate=${encodeURIComponent(fromDate)}&toDate=${encodeURIComponent(toDate)}`
+    );
+    tbody.innerHTML = '';
+    page.content.forEach((ev) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${escapeHtml(ev.eventTimestampUtc)}</td>
+        <td><strong>${escapeHtml(ev.eventType)}</strong></td>
+        <td>${escapeHtml(ev.actorType)}${ev.actorId ? '<br><span class="helper-text">' + escapeHtml(ev.actorId) + '</span>' : ''}</td>
+        <td>${escapeHtml(ev.subjectWorkerId || '-')}</td>
+        <td><code>${escapeHtml(ev.correlationId || '')}</code></td>
+        <td><code>${escapeHtml(ev.metadataJson || '{}')}</code></td>
+      `;
+      tbody.appendChild(tr);
+    });
+    document.getElementById('audit-pagination-info').textContent =
+      `Page ${page.number + 1} of ${Math.max(1, page.totalPages)} (${page.totalElements} events)`;
+    document.getElementById('btn-audit-prev').disabled = page.number <= 0;
+    document.getElementById('btn-audit-next').disabled = page.number + 1 >= page.totalPages;
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" class="banner banner-error">${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -608,6 +770,28 @@ document.getElementById('reports-search').addEventListener('input', () => {
 document.getElementById('btn-toggle-invite-form').addEventListener('click', () => {
   const form = document.getElementById('form-create-worker');
   form.hidden = !form.hidden;
+});
+
+document.getElementById('workers-status-filter').addEventListener('change', loadWorkersTable);
+let workersSearchTimer = null;
+document.getElementById('workers-search').addEventListener('input', () => {
+  clearTimeout(workersSearchTimer);
+  workersSearchTimer = setTimeout(loadWorkersTable, 250);
+});
+
+document.getElementById('btn-audit-filter').addEventListener('click', () => {
+  auditPage = 0;
+  loadAuditLog();
+});
+document.getElementById('btn-audit-prev').addEventListener('click', () => {
+  if (auditPage > 0) {
+    auditPage--;
+    loadAuditLog();
+  }
+});
+document.getElementById('btn-audit-next').addEventListener('click', () => {
+  auditPage++;
+  loadAuditLog();
 });
 
 document.getElementById('form-create-worker').addEventListener('submit', async (e) => {
