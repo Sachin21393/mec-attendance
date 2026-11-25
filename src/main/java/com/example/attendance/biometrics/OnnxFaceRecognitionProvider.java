@@ -1,18 +1,23 @@
 package com.example.attendance.biometrics;
 
+import ai.onnxruntime.OnnxTensor;
+import ai.onnxruntime.OrtEnvironment;
+import ai.onnxruntime.OrtException;
+import ai.onnxruntime.OrtSession;
 import com.example.attendance.common.AttendanceProperties;
 import com.example.attendance.common.ValidationException;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-import javax.imageio.ImageIO;
+import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.geom.AffineTransform;
+import java.awt.geom.NoninvertibleTransformException;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.nio.FloatBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,24 +26,17 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
-import ai.onnxruntime.OnnxTensor;
-import ai.onnxruntime.OrtEnvironment;
-import ai.onnxruntime.OrtException;
-import ai.onnxruntime.OrtSession;
-import jakarta.annotation.PreDestroy;
-
 /**
- * Production-candidate server-side face recognition provider using OpenCV Zoo models via ONNX Runtime:
+ * Server-side face detection and recognition provider using OpenCV Zoo ONNX models:
  * <ul>
- *   <li>Detector: YuNet (MIT License)</li>
- *   <li>Recognizer: SFace (Apache License 2.0, 128-dimensional L2-normalized embedding)</li>
+ *   <li>Detector: YuNet ({@code face_detection_yunet_2023mar.onnx}, MIT License)</li>
+ *   <li>Recognizer: SFace ({@code face_recognition_sface_2021dec.onnx}, Apache License 2.0, 128-D L2-normalized)</li>
  * </ul>
  *
  * <p><b>Known Liveness Limitation:</b> YuNet + SFace perform face detection and recognition only.
  * Quality checks (single face, bounding-box size, pose symmetry, luminance) do NOT prevent
- * printed-photo, screen-replay, or mask presentation attacks. Keep
- * {@code attendance.biometrics.production-enabled=false} until an approved PAD/liveness layer
- * and privacy/legal review are completed.
+ * printed-photo, screen-replay, or mask presentation attacks. Production biometric enrollment
+ * remains gated by {@code attendance.biometrics.production-enabled}.
  */
 @Component
 @ConditionalOnProperty(name = "attendance.biometrics.provider", havingValue = "onnx")
@@ -50,8 +48,18 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
     private static final int SFACE_INPUT_SIZE = 112;
     private static final float YUNET_SCORE_THRESHOLD = 0.60f;
     private static final float YUNET_NMS_THRESHOLD = 0.30f;
-    private static final int MIN_FACE_PIXELS = 80;
+    private static final float MIN_FACE_PIXELS = 48f;
     private static final int[] STRIDES = {8, 16, 32};
+
+    // Standard ArcFace / SFace 112x112 reference 5-point landmarks:
+    // [rightEye, leftEye, nose, rightMouthCorner, leftMouthCorner]
+    private static final double[][] REF_LANDMARKS_112 = {
+            {38.2946, 51.6963},
+            {73.5318, 51.5014},
+            {56.0252, 71.7366},
+            {41.5493, 92.3655},
+            {70.7299, 92.2041}
+    };
 
     private final ImagePayloadValidator imageValidator;
     private final int expectedDimension;
@@ -70,7 +78,8 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
         Path sfacePath = Path.of(properties.getBiometrics().getSfaceModelPath());
         if (!Files.isRegularFile(yunetPath) || !Files.isRegularFile(sfacePath)) {
             throw new IllegalStateException(
-                    "ONNX models not found. Expected YuNet at " + yunetPath + " and SFace at " + sfacePath
+                    "ONNX models not found. Expected YuNet at " + yunetPath.toAbsolutePath()
+                    + " and SFace at " + sfacePath.toAbsolutePath()
                     + ". See docs/biometrics-calibration.md for setup.");
         }
 
@@ -98,8 +107,8 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
     @Override
     public ExtractionResult extractEmbedding(byte[] imageBytes) {
         BufferedImage decoded = imageValidator.decodeAndValidateImage(imageBytes);
-        BufferedImage resized = resize(decoded, YUNET_INPUT_SIZE, YUNET_INPUT_SIZE);
-        List<DetectedFace> faces = detectFaces(resized);
+        LetterboxImage lb = letterbox(decoded, YUNET_INPUT_SIZE);
+        List<DetectedFace> faces = detectFaces(lb.image());
 
         if (faces.isEmpty()) {
             throw new ValidationException("NO_FACE_DETECTED", "No face detected. Place your face inside the frame.");
@@ -108,17 +117,36 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
             throw new ValidationException("MULTIPLE_FACES_DETECTED", "Multiple faces detected. Ensure only one person is in the frame.");
         }
 
-        DetectedFace face = faces.get(0);
-        if (face.width < MIN_FACE_PIXELS || face.height < MIN_FACE_PIXELS) {
+        DetectedFace f = faces.get(0);
+        // Map coordinates back from 640x640 letterbox space to original image space
+        DetectedFace origFace = new DetectedFace(
+                (f.x - lb.padX) / lb.scale,
+                (f.y - lb.padY) / lb.scale,
+                f.width / lb.scale,
+                f.height / lb.scale,
+                f.score,
+                (f.rightEyeX - lb.padX) / lb.scale,
+                (f.rightEyeY - lb.padY) / lb.scale,
+                (f.leftEyeX - lb.padX) / lb.scale,
+                (f.leftEyeY - lb.padY) / lb.scale,
+                (f.noseX - lb.padX) / lb.scale,
+                (f.noseY - lb.padY) / lb.scale,
+                (f.rightMouthX - lb.padX) / lb.scale,
+                (f.rightMouthY - lb.padY) / lb.scale,
+                (f.leftMouthX - lb.padX) / lb.scale,
+                (f.leftMouthY - lb.padY) / lb.scale
+        );
+
+        if (origFace.width < MIN_FACE_PIXELS || origFace.height < MIN_FACE_PIXELS) {
             throw new ValidationException("FACE_TOO_SMALL", "Move closer to the camera so your face fills the frame.");
         }
-        if (!passesFrontalPoseHeuristic(face)) {
+        if (!passesFrontalPoseHeuristic(origFace)) {
             throw new ValidationException("POSE_NOT_FRONTAL", "Look straight at the camera without tilting your head.");
         }
 
-        BufferedImage aligned = cropAndScaleFace(resized, face);
-        float[] embedding = runSface(aligned);
-        return new ExtractionResult(embedding, 1, face.score, true, "passive-quality-only-no-pad");
+        BufferedImage aligned112 = alignFace112(decoded, origFace);
+        float[] embedding = runSface(aligned112);
+        return new ExtractionResult(embedding, 1, origFace.score, true, "passive-quality-only-no-pad");
     }
 
     @Override
@@ -165,18 +193,16 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
     private List<DetectedFace> detectFaces(BufferedImage img640) {
         float[] tensorData = toBgrChwFloat(img640, false);
         long[] shape = {1, 3, YUNET_INPUT_SIZE, YUNET_INPUT_SIZE};
-        String inputName = yunetSession.getInputNames().iterator().next();
 
         try (OnnxTensor input = OnnxTensor.createTensor(env, FloatBuffer.wrap(tensorData), shape);
-             OrtSession.Result result = yunetSession.run(Map.of(inputName, input))) {
+             OrtSession.Result result = yunetSession.run(Map.of("input", input))) {
             List<DetectedFace> candidates = new ArrayList<>();
-            for (int sIdx = 0; sIdx < STRIDES.length; sIdx++) {
-                int stride = STRIDES[sIdx];
+            for (int stride : STRIDES) {
                 int grid = YUNET_INPUT_SIZE / stride;
-                float[][] cls = (float[][]) result.get(sIdx).getValue();
-                float[][] obj = (float[][]) result.get(sIdx + 3).getValue();
-                float[][] bbox = (float[][]) result.get(sIdx + 6).getValue();
-                float[][] kps = (float[][]) result.get(sIdx + 9).getValue();
+                float[][] cls = ((float[][][]) result.get("cls_" + stride).orElseThrow().getValue())[0];
+                float[][] obj = ((float[][][]) result.get("obj_" + stride).orElseThrow().getValue())[0];
+                float[][] bbox = ((float[][][]) result.get("bbox_" + stride).orElseThrow().getValue())[0];
+                float[][] kps = ((float[][][]) result.get("kps_" + stride).orElseThrow().getValue())[0];
 
                 for (int r = 0; r < grid; r++) {
                     for (int c = 0; c < grid; c++) {
@@ -194,13 +220,14 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
                         float x = cx - w / 2f;
                         float y = cy - h / 2f;
 
-                        float rightEyeX = (c + kps[idx][0]) * stride;
-                        float rightEyeY = (r + kps[idx][1]) * stride;
-                        float leftEyeX = (c + kps[idx][2]) * stride;
-                        float leftEyeY = (r + kps[idx][3]) * stride;
-                        float noseX = (c + kps[idx][4]) * stride;
-                        float noseY = (r + kps[idx][5]) * stride;
-                        candidates.add(new DetectedFace(x, y, w, h, score, rightEyeX, rightEyeY, leftEyeX, leftEyeY, noseX, noseY));
+                        candidates.add(new DetectedFace(
+                                x, y, w, h, score,
+                                (c + kps[idx][0]) * stride, (r + kps[idx][1]) * stride,
+                                (c + kps[idx][2]) * stride, (r + kps[idx][3]) * stride,
+                                (c + kps[idx][4]) * stride, (r + kps[idx][5]) * stride,
+                                (c + kps[idx][6]) * stride, (r + kps[idx][7]) * stride,
+                                (c + kps[idx][8]) * stride, (r + kps[idx][9]) * stride
+                        ));
                     }
                 }
             }
@@ -213,11 +240,10 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
     private float[] runSface(BufferedImage face112) {
         float[] tensorData = toBgrChwFloat(face112, true);
         long[] shape = {1, 3, SFACE_INPUT_SIZE, SFACE_INPUT_SIZE};
-        String inputName = sfaceSession.getInputNames().iterator().next();
 
         try (OnnxTensor input = OnnxTensor.createTensor(env, FloatBuffer.wrap(tensorData), shape);
-             OrtSession.Result result = sfaceSession.run(Map.of(inputName, input))) {
-            float[][] raw = (float[][]) result.get(0).getValue();
+             OrtSession.Result result = sfaceSession.run(Map.of("data", input))) {
+            float[][] raw = (float[][]) result.get("fc1").orElseThrow().getValue();
             float[] vec = raw[0];
             double norm = 0.0;
             for (float v : vec) {
@@ -243,10 +269,78 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
         float noseOffsetLeft = Math.abs(face.leftEyeX - face.noseX);
         float noseOffsetRight = Math.abs(face.noseX - face.rightEyeX);
         float ratio = Math.min(noseOffsetLeft, noseOffsetRight) / Math.max(noseOffsetLeft, noseOffsetRight);
-        return ratio >= 0.30f;
+        return ratio >= 0.25f;
     }
 
-    private static BufferedImage cropAndScaleFace(BufferedImage img, DetectedFace face) {
+    /**
+     * Estimates a 2D similarity transform (scale, rotation, translation) mapping the 5 detected
+     * facial landmarks to the standard 112x112 SFace/ArcFace reference template.
+     */
+    private static BufferedImage alignFace112(BufferedImage src, DetectedFace face) {
+        double[][] srcPts = {
+                {face.rightEyeX, face.rightEyeY},
+                {face.leftEyeX, face.leftEyeY},
+                {face.noseX, face.noseY},
+                {face.rightMouthX, face.rightMouthY},
+                {face.leftMouthX, face.leftMouthY}
+        };
+
+        AffineTransform transform = estimateSimilarityTransform(srcPts, REF_LANDMARKS_112);
+        if (transform == null) {
+            return fallbackCropAndScale(src, face);
+        }
+
+        BufferedImage aligned = new BufferedImage(SFACE_INPUT_SIZE, SFACE_INPUT_SIZE, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = aligned.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.drawImage(src, transform, null);
+        g.dispose();
+        return aligned;
+    }
+
+    private static AffineTransform estimateSimilarityTransform(double[][] src, double[][] dst) {
+        int n = src.length;
+        double meanSrcX = 0, meanSrcY = 0, meanDstX = 0, meanDstY = 0;
+        for (int i = 0; i < n; i++) {
+            meanSrcX += src[i][0];
+            meanSrcY += src[i][1];
+            meanDstX += dst[i][0];
+            meanDstY += dst[i][1];
+        }
+        meanSrcX /= n;
+        meanSrcY /= n;
+        meanDstX /= n;
+        meanDstY /= n;
+
+        double varSrc = 0;
+        double aNum = 0;
+        double bNum = 0;
+        for (int i = 0; i < n; i++) {
+            double sx = src[i][0] - meanSrcX;
+            double sy = src[i][1] - meanSrcY;
+            double dx = dst[i][0] - meanDstX;
+            double dy = dst[i][1] - meanDstY;
+            varSrc += sx * sx + sy * sy;
+            aNum += sx * dx + sy * dy;
+            bNum += sx * dy - sy * dx;
+        }
+        if (varSrc < 1e-6) {
+            return null;
+        }
+        double a = aNum / varSrc;
+        double b = bNum / varSrc;
+        double tx = meanDstX - (a * meanSrcX - b * meanSrcY);
+        double ty = meanDstY - (b * meanSrcX + a * meanSrcY);
+        AffineTransform at = new AffineTransform(a, b, -b, a, tx, ty);
+        try {
+            at.createInverse();
+            return at;
+        } catch (NoninvertibleTransformException e) {
+            return null;
+        }
+    }
+
+    private static BufferedImage fallbackCropAndScale(BufferedImage img, DetectedFace face) {
         int padX = Math.round(face.width * 0.15f);
         int padY = Math.round(face.height * 0.15f);
         int x = Math.max(0, Math.round(face.x) - padX);
@@ -254,16 +348,29 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
         int w = Math.min(img.getWidth() - x, Math.round(face.width) + padX * 2);
         int h = Math.min(img.getHeight() - y, Math.round(face.height) + padY * 2);
         BufferedImage crop = img.getSubimage(x, y, Math.max(1, w), Math.max(1, h));
-        return resize(crop, SFACE_INPUT_SIZE, SFACE_INPUT_SIZE);
-    }
-
-    private static BufferedImage resize(BufferedImage src, int targetW, int targetH) {
-        BufferedImage out = new BufferedImage(targetW, targetH, BufferedImage.TYPE_INT_RGB);
+        BufferedImage out = new BufferedImage(SFACE_INPUT_SIZE, SFACE_INPUT_SIZE, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = out.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g.drawImage(src, 0, 0, targetW, targetH, null);
+        g.drawImage(crop, 0, 0, SFACE_INPUT_SIZE, SFACE_INPUT_SIZE, null);
         g.dispose();
         return out;
+    }
+
+    private static LetterboxImage letterbox(BufferedImage src, int targetSize) {
+        double scale = Math.min((double) targetSize / src.getWidth(), (double) targetSize / src.getHeight());
+        int newW = (int) Math.round(src.getWidth() * scale);
+        int newH = (int) Math.round(src.getHeight() * scale);
+        int padX = (targetSize - newW) / 2;
+        int padY = (targetSize - newH) / 2;
+
+        BufferedImage out = new BufferedImage(targetSize, targetSize, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = out.createGraphics();
+        g.setColor(Color.BLACK);
+        g.fillRect(0, 0, targetSize, targetSize);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.drawImage(src, padX, padY, newW, newH, null);
+        g.dispose();
+        return new LetterboxImage(out, (float) scale, padX, padY);
     }
 
     private static float[] toBgrChwFloat(BufferedImage img, boolean normalizeMinusOneToOne) {
@@ -278,9 +385,9 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
                 float g = (rgb >> 8) & 0xFF;
                 float b = rgb & 0xFF;
                 if (normalizeMinusOneToOne) {
-                    b = (b - 127.5f) / 128.0f;
-                    g = (g - 127.5f) / 128.0f;
-                    r = (r - 127.5f) / 128.0f;
+                    b = (b - 127.5f) / 127.5f;
+                    g = (g - 127.5f) / 127.5f;
+                    r = (r - 127.5f) / 127.5f;
                 }
                 int idx = y * w + x;
                 out[idx] = b;
@@ -319,9 +426,16 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
         return union <= 0f ? 0f : inter / union;
     }
 
+    private record LetterboxImage(BufferedImage image, float scale, int padX, int padY) {
+    }
+
     private record DetectedFace(
             float x, float y, float width, float height, float score,
-            float rightEyeX, float rightEyeY, float leftEyeX, float leftEyeY, float noseX, float noseY
+            float rightEyeX, float rightEyeY,
+            float leftEyeX, float leftEyeY,
+            float noseX, float noseY,
+            float rightMouthX, float rightMouthY,
+            float leftMouthX, float leftMouthY
     ) {
     }
 }

@@ -5,11 +5,16 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
+import java.time.ZoneOffset;
+import java.util.TimeZone;
+
 @SpringBootApplication
 @EnableConfigurationProperties(AttendanceProperties.class)
 public class AttendanceApplication {
 
     public static void main(String[] args) {
+        // Keep JVM default timezone UTC so JDBC TIME columns do not shift relative to hibernate.jdbc.time_zone=UTC.
+        TimeZone.setDefault(TimeZone.getTimeZone(ZoneOffset.UTC));
         SpringApplication.run(AttendanceApplication.class, args);
     }
 }

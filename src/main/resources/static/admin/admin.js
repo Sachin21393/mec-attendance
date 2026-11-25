@@ -206,9 +206,10 @@ async function openDetailDrawer(recordId) {
       <div class="detail-kv"><span>UTC Timestamp</span><span>${escapeHtml(d.checkInAtUtc)}</span></div>
       <div class="detail-kv"><span>Status</span><strong>${escapeHtml(d.attendanceStatus)}</strong></div>
       <div class="detail-kv"><span>Method</span><strong>${escapeHtml(d.attendanceMethod)}</strong></div>
-      <div class="detail-kv"><span>Recorded By</span><strong>${escapeHtml(d.actorWorkerName)}${d.actorWorkerCode ? ' (' + escapeHtml(d.actorWorkerCode) + ')' : ''}</strong></div>
+      <div class="detail-kv"><span>Recorded By</span><strong>${d.actorWorkerName ? `${escapeHtml(d.actorWorkerName)}${d.actorWorkerCode ? ' (' + escapeHtml(d.actorWorkerCode) + ')' : ''}` : 'Administrator (Manual)'}</strong></div>
       ${d.notes ? `<div class="detail-kv"><span>Notes</span><span>${escapeHtml(d.notes)}</span></div>` : ''}
       <h3 style="margin: 20px 0 8px; font-size: 0.95rem;">Admin Correction (Audited)</h3>
+      <div id="drawer-error" class="banner banner-error" hidden></div>
       <form id="form-correct-attendance" class="inline-form-card">
         <div class="field">
           <label for="corr-status">Updated status</label>
@@ -249,15 +250,22 @@ async function openDetailDrawer(recordId) {
 
     document.getElementById('form-correct-attendance').addEventListener('submit', async (ev) => {
       ev.preventDefault();
-      await apiFetch(`/api/v1/admin/attendance/${encodeURIComponent(recordId)}/correct`, {
-        method: 'POST',
-        body: {
-          newStatus: document.getElementById('corr-status').value,
-          reason: document.getElementById('corr-reason').value.trim()
-        }
-      });
-      await openDetailDrawer(recordId);
-      await loadDashboardAndGrid();
+      const errBox = document.getElementById('drawer-error');
+      errBox.hidden = true;
+      try {
+        await apiFetch(`/api/v1/admin/attendance/${encodeURIComponent(recordId)}/correct`, {
+          method: 'POST',
+          body: {
+            newStatus: document.getElementById('corr-status').value,
+            reason: document.getElementById('corr-reason').value.trim()
+          }
+        });
+        await openDetailDrawer(recordId);
+        await loadDashboardAndGrid();
+      } catch (err) {
+        errBox.textContent = err.message || 'Could not save correction.';
+        errBox.hidden = false;
+      }
     });
   } catch (err) {
     body.innerHTML = `<div class="banner banner-error">${escapeHtml(err.message || 'Failed to load details.')}</div>`;
@@ -274,6 +282,7 @@ function openManualExceptionDrawer(workerId, fullName, workerCode, date) {
     </p>
     <div class="detail-kv"><span>Worker</span><strong>${escapeHtml(fullName)} (${escapeHtml(workerCode)})</strong></div>
     <div class="detail-kv"><span>Date</span><strong>${escapeHtml(date)}</strong></div>
+    <div id="drawer-error" class="banner banner-error" style="margin-top: 12px;" hidden></div>
     <form id="form-manual-exception" class="inline-form-card" style="margin-top: 16px;">
       <div class="field">
         <label for="man-status">Status</label>
@@ -296,18 +305,25 @@ function openManualExceptionDrawer(workerId, fullName, workerCode, date) {
   `;
   document.getElementById('form-manual-exception').addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const res = await apiFetch('/api/v1/admin/attendance/manual', {
-      method: 'POST',
-      body: {
-        workerId,
-        attendanceDate: date,
-        status: document.getElementById('man-status').value,
-        checkInLocalTime: document.getElementById('man-time').value,
-        reason: document.getElementById('man-reason').value.trim()
-      }
-    });
-    await openDetailDrawer(res.id);
-    await loadDashboardAndGrid();
+    const errBox = document.getElementById('drawer-error');
+    errBox.hidden = true;
+    try {
+      const res = await apiFetch('/api/v1/admin/attendance/manual', {
+        method: 'POST',
+        body: {
+          workerId,
+          attendanceDate: date,
+          status: document.getElementById('man-status').value,
+          checkInLocalTime: document.getElementById('man-time').value,
+          reason: document.getElementById('man-reason').value.trim()
+        }
+      });
+      await openDetailDrawer(res.id);
+      await loadDashboardAndGrid();
+    } catch (err) {
+      errBox.textContent = err.message || 'Could not record manual attendance.';
+      errBox.hidden = false;
+    }
   });
 }
 
@@ -321,6 +337,10 @@ async function loadWorkersTable() {
       `/api/v1/admin/workers?size=100&query=${encodeURIComponent(query)}&status=${encodeURIComponent(status)}`
     );
     tbody.innerHTML = '';
+    if (page.content.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="helper-text">No workers match the current filter.</td></tr>';
+      return;
+    }
     page.content.forEach((w) => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
@@ -343,26 +363,38 @@ async function loadWorkersTable() {
 
     tbody.querySelectorAll('.btn-revoke-sess').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        await apiFetch(`/api/v1/admin/workers/${btn.dataset.id}/sessions/revoke`, { method: 'POST' });
-        await loadWorkersTable();
+        try {
+          await apiFetch(`/api/v1/admin/workers/${btn.dataset.id}/sessions/revoke`, { method: 'POST' });
+          await loadWorkersTable();
+        } catch (err) {
+          setGlobalError(err.message || 'Could not revoke worker sessions.');
+        }
       });
     });
     tbody.querySelectorAll('.btn-reset-bio').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        const res = await apiFetch(`/api/v1/admin/workers/${btn.dataset.id}/biometric-reset`, {
-          method: 'POST',
-          body: { reason: 'Admin biometric reset' }
-        });
-        const banner = document.getElementById('invite-created-banner');
-        banner.textContent = `Biometric template cleared for ${res.worker.workerCode}. New one-time invitation code: ${res.invitationCode}`;
-        banner.hidden = false;
-        await loadWorkersTable();
+        try {
+          const res = await apiFetch(`/api/v1/admin/workers/${btn.dataset.id}/biometric-reset`, {
+            method: 'POST',
+            body: { reason: 'Admin biometric reset' }
+          });
+          const banner = document.getElementById('invite-created-banner');
+          banner.textContent = `Biometric template cleared for ${res.worker.workerCode}. New one-time invitation code: ${res.invitationCode}`;
+          banner.hidden = false;
+          await loadWorkersTable();
+        } catch (err) {
+          setGlobalError(err.message || 'Could not reset biometrics.');
+        }
       });
     });
     tbody.querySelectorAll('.btn-disable-w').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        await apiFetch(`/api/v1/admin/workers/${btn.dataset.id}/disable`, { method: 'POST' });
-        await loadWorkersTable();
+        try {
+          await apiFetch(`/api/v1/admin/workers/${btn.dataset.id}/disable`, { method: 'POST' });
+          await loadWorkersTable();
+        } catch (err) {
+          setGlobalError(err.message || 'Could not disable worker.');
+        }
       });
     });
   } catch (err) {

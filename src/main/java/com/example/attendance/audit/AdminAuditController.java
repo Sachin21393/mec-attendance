@@ -1,8 +1,11 @@
 package com.example.attendance.audit;
 
 import com.example.attendance.common.ValidationException;
+import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -12,6 +15,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -37,8 +42,31 @@ public class AdminAuditController {
         String cleanType = (eventType == null || eventType.isBlank()) ? null : eventType.trim();
         Instant fromTs = parseDateStart(fromDate);
         Instant toTs = parseDateEnd(toDate);
-        PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100));
-        return auditEventRepository.search(cleanType, actorId, subjectWorkerId, fromTs, toTs, pageable);
+        PageRequest pageable = PageRequest.of(
+                Math.max(page, 0),
+                Math.min(Math.max(size, 1), 100),
+                Sort.by(Sort.Direction.DESC, "eventTimestampUtc")
+        );
+        Specification<AuditEvent> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (cleanType != null) {
+                predicates.add(cb.equal(root.get("eventType"), cleanType));
+            }
+            if (actorId != null) {
+                predicates.add(cb.equal(root.get("actorId"), actorId));
+            }
+            if (subjectWorkerId != null) {
+                predicates.add(cb.equal(root.get("subjectWorkerId"), subjectWorkerId));
+            }
+            if (fromTs != null) {
+                predicates.add(cb.greaterThanOrEqualTo(root.get("eventTimestampUtc"), fromTs));
+            }
+            if (toTs != null) {
+                predicates.add(cb.lessThanOrEqualTo(root.get("eventTimestampUtc"), toTs));
+            }
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+        return auditEventRepository.findAll(spec, pageable);
     }
 
     private static Instant parseDateStart(String dateStr) {

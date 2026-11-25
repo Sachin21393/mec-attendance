@@ -54,7 +54,7 @@ Never commit real secrets, production keys, or `.env` files containing credentia
 |---|---|---|---|
 | `SPRING_PROFILES_ACTIVE` | No | `local` | Active Spring profile (`local`, `test`, `prod`). |
 | `SERVER_PORT` | No | `8080` | HTTP port exposed by Spring Boot. |
-| `DB_URL` | Yes (prod) | `jdbc:postgresql://localhost:5432/attendance` | JDBC PostgreSQL connection URL. |
+| `DB_URL` | Yes (prod) | `jdbc:postgresql://localhost:55432/attendance` | JDBC PostgreSQL connection URL. |
 | `DB_USERNAME` | Yes (prod) | `attendance` | PostgreSQL username. |
 | `DB_PASSWORD` | Yes | *(dev-only placeholder in local profile)* | PostgreSQL password. |
 
@@ -72,8 +72,8 @@ Never commit real secrets, production keys, or `.env` files containing credentia
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `ATTENDANCE_BIOMETRICS_PROVIDER` | No | `mock` | `mock` for deterministic dev/test mode; `onnx` for YuNet + SFace inference. |
-| `ATTENDANCE_PRODUCTION_BIOMETRICS_ENABLED` | No | `false` | Safety gate preventing real biometric enrollment/matching until legal & PAD approval. |
+| `ATTENDANCE_BIOMETRICS_PROVIDER` | No | `onnx` (`local`), `mock` (`test`) | `onnx` for real YuNet + SFace inference; `mock` for deterministic tests. |
+| `ATTENDANCE_PRODUCTION_BIOMETRICS_ENABLED` | No | `true` (`local`), `false` (`prod`) | Safety gate preventing real biometric enrollment/matching in production until legal & PAD approval. |
 | `ATTENDANCE_BIOMETRICS_YUNET_MODEL_PATH` | When `onnx` | `models/face_detection_yunet_2023mar.onnx` | Path to MIT-licensed YuNet ONNX detector model. |
 | `ATTENDANCE_BIOMETRICS_SFACE_MODEL_PATH` | When `onnx` | `models/face_recognition_sface_2021dec.onnx` | Path to Apache-2.0 SFace ONNX embedding model. |
 | `ATTENDANCE_BIOMETRICS_EMBEDDING_DIM` | No | `128` | Expected embedding dimension (`128` for SFace). |

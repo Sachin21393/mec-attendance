@@ -153,6 +153,10 @@ public class BiometricsVerificationService {
     private MatchCandidate matchSpecificWorker(Worker target, float[] probeEmbedding, double threshold) {
         WorkerBiometric bio = biometricRepository.findByWorkerId(target.getId())
                 .orElseThrow(() -> new ValidationException("BIOMETRICS_NOT_ENROLLED", "Face template is not enrolled for this worker."));
+        if (!faceProvider.modelName().equals(bio.getEmbeddingModel())
+                || bio.getEmbeddingDimension() != probeEmbedding.length) {
+            throw new ValidationException("BIOMETRICS_MODEL_MISMATCH", "Enrolled face template must be re-enrolled for the active recognition model.");
+        }
         float[] reference = encryptionService.decrypt(bio.getEncryptedEmbedding(), bio.getEncryptionIv());
         double sim = faceProvider.cosineSimilarity(probeEmbedding, reference);
         return sim >= threshold ? new MatchCandidate(target, sim) : null;
@@ -175,9 +179,12 @@ public class BiometricsVerificationService {
         var actorBioOpt = biometricRepository.findByWorkerId(actor.getId());
         if (actorBioOpt.isPresent()) {
             WorkerBiometric actorBio = actorBioOpt.get();
-            float[] actorRef = encryptionService.decrypt(actorBio.getEncryptedEmbedding(), actorBio.getEncryptionIv());
-            if (faceProvider.cosineSimilarity(probeEmbedding, actorRef) >= threshold) {
-                throw new ValidationException("SELF_PROXY_NOT_ALLOWED", "Use regular self check-in for your own attendance.");
+            if (faceProvider.modelName().equals(actorBio.getEmbeddingModel())
+                    && actorBio.getEmbeddingDimension() == probeEmbedding.length) {
+                float[] actorRef = encryptionService.decrypt(actorBio.getEncryptedEmbedding(), actorBio.getEncryptionIv());
+                if (faceProvider.cosineSimilarity(probeEmbedding, actorRef) >= threshold) {
+                    throw new ValidationException("SELF_PROXY_NOT_ALLOWED", "Use regular self check-in for your own attendance.");
+                }
             }
         }
 
@@ -193,6 +200,10 @@ public class BiometricsVerificationService {
                 continue;
             }
             WorkerBiometric bio = bioOpt.get();
+            if (!faceProvider.modelName().equals(bio.getEmbeddingModel())
+                    || bio.getEmbeddingDimension() != probeEmbedding.length) {
+                continue;
+            }
             float[] ref = encryptionService.decrypt(bio.getEncryptedEmbedding(), bio.getEncryptionIv());
             double sim = faceProvider.cosineSimilarity(probeEmbedding, ref);
             if (sim >= threshold && (best == null || sim > best.similarity())) {

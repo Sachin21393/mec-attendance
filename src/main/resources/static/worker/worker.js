@@ -100,17 +100,6 @@ function captureCanvasBase64() {
   return canvas.toDataURL('image/jpeg', 0.85);
 }
 
-function buildSyntheticMockPayload() {
-  if (state.cameraMode === 'register') {
-    return btoa(`MOCK_FACE_${state.invitationCode}`);
-  }
-  if (state.cameraMode === 'proxy') {
-    const targetCode = document.getElementById('input-proxy-target-code').value.trim().toUpperCase() || 'W001';
-    return btoa(`MOCK_FACE_${targetCode}`);
-  }
-  return btoa(`MOCK_FACE_${state.worker.workerCode}`);
-}
-
 function setupVoiceInput() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const btn = document.getElementById('btn-voice-name');
@@ -276,9 +265,7 @@ async function handleCameraCapture(imageBase64) {
 
   state.busy = true;
   const actionBtn = document.getElementById('btn-capture-action');
-  const mockBtn = document.getElementById('btn-mock-capture');
   actionBtn.disabled = true;
-  mockBtn.disabled = true;
   setBanner('camera-error', '');
   setScanning(true);
 
@@ -344,7 +331,6 @@ async function handleCameraCapture(imageBase64) {
   } finally {
     state.busy = false;
     actionBtn.disabled = false;
-    mockBtn.disabled = false;
   }
 }
 
@@ -437,7 +423,6 @@ async function init() {
     state.biometricsConfig = await apiFetch('/api/v1/biometrics/config');
     if (state.biometricsConfig.mockMode) {
       document.getElementById('mock-mode-badge').hidden = false;
-      document.getElementById('btn-mock-capture').hidden = false;
     }
   } catch {
     // Non-fatal
@@ -552,10 +537,6 @@ document.getElementById('btn-capture-action').addEventListener('click', async ()
     return;
   }
   await handleCameraCapture(img);
-});
-
-document.getElementById('btn-mock-capture').addEventListener('click', async () => {
-  await handleCameraCapture(buildSyntheticMockPayload());
 });
 
 document.getElementById('btn-proxy-confirm-submit').addEventListener('click', submitProxyConfirmation);
