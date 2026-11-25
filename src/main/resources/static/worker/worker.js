@@ -69,10 +69,15 @@ async function startCamera() {
   }
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 800 } },
-      audio: false
-    });
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 800 } },
+        audio: false
+      });
+    } catch {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    }
     state.stream = stream;
     const video = document.getElementById('camera-video');
     video.srcObject = stream;
@@ -183,10 +188,32 @@ async function refreshHome(justRegistered = false) {
   showView('home');
 }
 
+async function showKioskHome() {
+  stopCamera();
+  try {
+    const k = await apiFetch('/api/v1/attendance/kiosk/status');
+    document.getElementById('kiosk-workplace-meta').textContent =
+      `${k.workplaceName} (${k.timezoneId}) — Registered workers can mark attendance directly below.`;
+    document.getElementById('kiosk-date').textContent = k.attendanceDate || '-';
+    if (k.dayType && k.dayType !== 'WORKING') {
+      document.getElementById('kiosk-shift-info').textContent = k.dayType === 'HOLIDAY' ? 'Holiday' : 'Weekly off';
+      document.getElementById('btn-kiosk-mark-attendance').disabled = true;
+      document.getElementById('btn-kiosk-mark-attendance').textContent = 'Non-working day';
+    } else {
+      document.getElementById('kiosk-shift-info').textContent = `${k.shiftStartLocal.slice(0, 5)} (${k.gracePeriodMinutes}m grace)`;
+      document.getElementById('btn-kiosk-mark-attendance').disabled = false;
+      document.getElementById('btn-kiosk-mark-attendance').textContent = 'Mark your attendance';
+    }
+  } catch {
+    // Non-fatal fallback
+  }
+  showView('welcome');
+}
+
 function openCameraView(mode) {
   state.cameraMode = mode;
   state.pendingProxyVerify = null;
-  state.pendingIdempotencyKey = (mode === 'self' || mode === 'proxy') ? crypto.randomUUID() : null;
+  state.pendingIdempotencyKey = (mode === 'self' || mode === 'proxy' || mode === 'kiosk') ? crypto.randomUUID() : null;
 
   const heading = document.getElementById('camera-heading');
   const guidance = document.getElementById('camera-guidance');
@@ -302,6 +329,21 @@ async function handleCameraCapture(imageBase64) {
       document.getElementById('proxy-confirm-question').textContent =
         `You are marking attendance for ${verify.matchedWorkerName} (${verify.matchedWorkerCode}). Continue?`;
       showView('proxyConfirm');
+    } else if (state.cameraMode === 'kiosk') {
+      document.getElementById('camera-guidance').textContent = 'Recognizing your face...';
+      const verify = await apiFetch('/api/v1/attendance/kiosk/verify', {
+        method: 'POST',
+        body: { imageBase64 }
+      });
+      const checkIn = await apiFetch('/api/v1/attendance/kiosk/check-in', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': state.pendingIdempotencyKey },
+        body: {
+          verificationToken: verify.verificationToken,
+          idempotencyKey: state.pendingIdempotencyKey
+        }
+      });
+      showAttendanceSuccess(checkIn);
     } else {
       document.getElementById('camera-guidance').textContent = 'Verifying your face...';
       const verify = await apiFetch('/api/v1/biometrics/verify', {
@@ -432,9 +474,17 @@ async function init() {
     state.worker = await apiFetch('/api/v1/workers/me');
     await refreshHome(false);
   } catch {
-    showView('welcome');
+    await showKioskHome();
   }
 }
+
+document.getElementById('btn-kiosk-mark-attendance')?.addEventListener('click', () => {
+  if (!navigator.onLine) {
+    showAttendanceFailure("You're offline. Your attendance has not been recorded.", true);
+    return;
+  }
+  openCameraView('kiosk');
+});
 
 document.getElementById('btn-start-register').addEventListener('click', () => {
   setBanner('invite-error', '');
@@ -525,6 +575,8 @@ document.getElementById('btn-camera-cancel').addEventListener('click', () => {
   stopCamera();
   if (state.cameraMode === 'register') {
     showView('consent');
+  } else if (state.cameraMode === 'kiosk' && !state.worker) {
+    showKioskHome();
   } else {
     refreshHome(false);
   }
@@ -543,18 +595,24 @@ document.getElementById('btn-proxy-confirm-submit').addEventListener('click', su
 document.getElementById('btn-proxy-confirm-cancel').addEventListener('click', () => refreshHome(false));
 
 document.getElementById('btn-result-retry').addEventListener('click', () => openCameraView(state.cameraMode));
-document.getElementById('btn-result-done').addEventListener('click', () => refreshHome(false));
+document.getElementById('btn-result-done').addEventListener('click', () => {
+  if (state.worker) {
+    refreshHome(false);
+  } else {
+    showKioskHome();
+  }
+});
 
 document.getElementById('btn-switch-worker').addEventListener('click', async () => {
   await apiFetch('/api/v1/workers/logout', { method: 'POST' }).catch(() => {});
   state.worker = null;
-  showView('welcome');
+  await showKioskHome();
 });
 
 document.getElementById('btn-revoke-device').addEventListener('click', async () => {
   await apiFetch('/api/v1/workers/device/revoke', { method: 'POST' }).catch(() => {});
   state.worker = null;
-  showView('welcome');
+  await showKioskHome();
 });
 
 init();

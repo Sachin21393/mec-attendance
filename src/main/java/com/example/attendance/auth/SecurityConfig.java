@@ -79,11 +79,17 @@ public class SecurityConfig {
                                 "/manifest.webmanifest", "/service-worker.js", "/favicon.ico"
                         ).permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/csrf", "/api/v1/biometrics/config").permitAll()
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/auth/csrf",
+                                "/api/v1/biometrics/config",
+                                "/api/v1/attendance/kiosk/status"
+                        ).permitAll()
                         .requestMatchers(HttpMethod.POST,
                                 "/api/v1/admin/auth/login",
                                 "/api/v1/worker-invitations/validate",
-                                "/api/v1/workers/register"
+                                "/api/v1/workers/register",
+                                "/api/v1/attendance/kiosk/verify",
+                                "/api/v1/attendance/kiosk/check-in"
                         ).permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/workers/**", "/api/v1/biometrics/**", "/api/v1/attendance/**").hasRole("WORKER")

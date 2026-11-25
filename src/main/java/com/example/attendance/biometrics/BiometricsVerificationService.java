@@ -150,6 +150,100 @@ public class BiometricsVerificationService {
         );
     }
 
+    /**
+     * Verifies a worker directly against enrolled registered templates (1:N or optional workerCode hint)
+     * without requiring a prior worker session cookie on the kiosk device.
+     */
+    @Transactional
+    public KioskVerificationOutcome verifyKiosk(String workerCodeHint, String imageBase64) {
+        if (!faceProvider.isMock() && !properties.getBiometrics().isProductionEnabled()) {
+            throw new AppException(
+                    "PRODUCTION_BIOMETRICS_DISABLED",
+                    "Production biometric verification is disabled until privacy and liveness approval.",
+                    HttpStatus.SERVICE_UNAVAILABLE
+            );
+        }
+
+        AttendanceSettings settings = settingsRepository.findTopByOrderByEffectiveFromUtcDesc()
+                .orElseThrow(() -> new IllegalStateException("Attendance settings not configured"));
+
+        byte[] imageBytes = imageValidator.decodeBase64(imageBase64);
+        FaceRecognitionProvider.ExtractionResult probe;
+        try {
+            probe = faceProvider.extractEmbedding(imageBytes);
+        } catch (AppException ex) {
+            auditService.recordIndependent(
+                    "BIOMETRIC_VERIFY_FAILED",
+                    AuditActorType.WORKER,
+                    null,
+                    null,
+                    Map.of("mode", "KIOSK", "reasonCode", ex.getCode())
+            );
+            throw ex;
+        }
+
+        double threshold = settings.getFaceMatchThreshold();
+        MatchCandidate match;
+        if (workerCodeHint != null && !workerCodeHint.isBlank()) {
+            Worker requested = workerRepository.findByWorkerCode(workerCodeHint.trim().toUpperCase())
+                    .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker code was not found."));
+            if (requested.getStatus() != WorkerStatus.REGISTERED) {
+                throw new ValidationException("WORKER_NOT_ACTIVE", "Worker account is not active for attendance.");
+            }
+            match = matchSpecificWorker(requested, probe.embedding(), threshold);
+        } else {
+            match = findBestMatchingWorker(null, probe.embedding(), threshold);
+        }
+
+        if (match == null) {
+            auditService.recordIndependent(
+                    "BIOMETRIC_VERIFY_FAILED",
+                    AuditActorType.WORKER,
+                    null,
+                    null,
+                    Map.of("mode", "KIOSK", "reasonCode", "FACE_NOT_RECOGNIZED")
+            );
+            throw new AppException(
+                    "FACE_NOT_RECOGNIZED",
+                    "We couldn't recognize your face. Please try again in better lighting or ask your administrator to register you.",
+                    HttpStatus.UNPROCESSABLE_ENTITY
+            );
+        }
+
+        String rawToken = TokenHashUtil.generateOpaqueToken();
+        Instant now = Instant.now();
+        Instant expiresAt = now.plusSeconds(properties.getSecurity().getVerificationTokenTtlSeconds());
+        tokenRepository.save(new BiometricVerificationToken(
+                UUID.randomUUID(),
+                TokenHashUtil.sha256Hex(rawToken),
+                match.worker().getId(),
+                match.worker().getId(),
+                "KIOSK",
+                match.similarity(),
+                faceProvider.isMock(),
+                expiresAt,
+                now
+        ));
+
+        auditService.record(
+                "BIOMETRIC_VERIFY_SUCCEEDED",
+                AuditActorType.WORKER,
+                match.worker().getId(),
+                match.worker().getId(),
+                Map.of("mode", "KIOSK", "mockMode", faceProvider.isMock())
+        );
+
+        return new KioskVerificationOutcome(
+                rawToken,
+                expiresAt,
+                match.worker().getId(),
+                match.worker().getWorkerCode(),
+                match.worker().getFullName(),
+                match.worker().getTeamName(),
+                faceProvider.isMock()
+        );
+    }
+
     private MatchCandidate matchSpecificWorker(Worker target, float[] probeEmbedding, double threshold) {
         WorkerBiometric bio = biometricRepository.findByWorkerId(target.getId())
                 .orElseThrow(() -> new ValidationException("BIOMETRICS_NOT_ENROLLED", "Face template is not enrolled for this worker."));
@@ -189,10 +283,14 @@ public class BiometricsVerificationService {
         }
 
         // Identify matching registered worker excluding actor
+        return findBestMatchingWorker(actor.getId(), probeEmbedding, threshold);
+    }
+
+    private MatchCandidate findBestMatchingWorker(UUID excludeWorkerId, float[] probeEmbedding, double threshold) {
         List<Worker> registered = workerRepository.findByStatusOrderByWorkerCodeAsc(WorkerStatus.REGISTERED);
         MatchCandidate best = null;
         for (Worker candidate : registered) {
-            if (candidate.getId().equals(actor.getId())) {
+            if (excludeWorkerId != null && candidate.getId().equals(excludeWorkerId)) {
                 continue;
             }
             var bioOpt = biometricRepository.findByWorkerId(candidate.getId());
@@ -228,6 +326,17 @@ public class BiometricsVerificationService {
             UUID matchedWorkerId,
             String matchedWorkerCode,
             String matchedWorkerName,
+            boolean mockMode
+    ) {
+    }
+
+    public record KioskVerificationOutcome(
+            String verificationToken,
+            Instant expiresAtUtc,
+            UUID matchedWorkerId,
+            String matchedWorkerCode,
+            String matchedWorkerName,
+            String teamName,
             boolean mockMode
     ) {
     }

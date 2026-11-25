@@ -20,6 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -157,34 +159,7 @@ public class WorkerOnboardingService {
             );
         }
 
-        if (!faceProvider.isMock() && !properties.getBiometrics().isProductionEnabled()) {
-            throw new AppException(
-                    "PRODUCTION_BIOMETRICS_DISABLED",
-                    "Production biometric enrollment is currently disabled pending privacy and liveness approval.",
-                    HttpStatus.SERVICE_UNAVAILABLE
-            );
-        }
-
-        byte[] imageBytes = imageValidator.decodeBase64(imageBase64);
-        FaceRecognitionProvider.ExtractionResult extraction = faceProvider.extractEmbedding(imageBytes);
-        BiometricEncryptionService.EncryptedTemplate encrypted = encryptionService.encrypt(extraction.embedding());
-
-        if (biometricRepository.findByWorkerId(worker.getId()).isPresent()) {
-            throw new ConflictException("BIOMETRICS_ALREADY_ENROLLED", "Biometrics already exist for this worker.");
-        }
-
-        biometricRepository.save(new WorkerBiometric(
-                UUID.randomUUID(),
-                worker.getId(),
-                encrypted.ciphertext(),
-                encrypted.iv(),
-                encrypted.keyVersion(),
-                faceProvider.modelName(),
-                faceProvider.modelVersion(),
-                faceProvider.embeddingDimension(),
-                effectiveConsentVersion,
-                now
-        ));
+        enrollBiometricTemplate(worker, effectiveConsentVersion, imageBase64, now);
 
         worker.setFullName(fullName.trim());
         worker.setStatus(WorkerStatus.REGISTERED);
@@ -222,6 +197,166 @@ public class WorkerOnboardingService {
         return new RegistrationOutcome(worker, rawSessionToken, ttl, faceProvider.isMock());
     }
 
+    /**
+     * Enrolls a worker directly via an administrator (new or existing un-enrolled worker),
+     * storing consent, encrypted face template, and marking open invitations consumed.
+     */
+    @Transactional
+    public AdminWorkerEnrollmentOutcome enrollByAdmin(
+            UUID adminUserId,
+            UUID workerId,
+            String workerCode,
+            String fullName,
+            String teamName,
+            LocalDate employmentStartDate,
+            boolean consentGiven,
+            String consentVersion,
+            String imageBase64,
+            String remoteAddr
+    ) {
+        String effectiveConsentVersion = (consentVersion == null || consentVersion.isBlank())
+                ? BiometricsConfigController.CURRENT_CONSENT_VERSION
+                : consentVersion.trim();
+
+        if (!consentGiven) {
+            throw new AppException(
+                    "CONSENT_REQUIRED_FOR_BIOMETRICS",
+                    "Worker consent is required before enrolling a face template.",
+                    HttpStatus.UNPROCESSABLE_ENTITY
+            );
+        }
+
+        Instant now = Instant.now();
+        Worker worker = resolveWorkerForAdminEnrollment(workerId, workerCode, fullName, teamName, employmentStartDate, now);
+
+        // Extract and validate face before persisting biometric or status changes
+        enrollBiometricTemplate(worker, effectiveConsentVersion, imageBase64, now);
+
+        worker.setFullName(fullName.trim());
+        if (teamName != null) {
+            worker.setTeamName(teamName.isBlank() ? null : teamName.trim());
+        }
+        if (employmentStartDate != null) {
+            worker.setEmploymentStartDate(employmentStartDate);
+        }
+        worker.setStatus(WorkerStatus.REGISTERED);
+        worker.setUpdatedAt(now);
+        workerRepository.save(worker);
+
+        String ipHash = remoteAddr != null ? TokenHashUtil.sha256Hex(remoteAddr) : null;
+        consentRecordRepository.save(new ConsentRecord(
+                UUID.randomUUID(),
+                worker.getId(),
+                effectiveConsentVersion,
+                true,
+                BiometricsConfigController.CONSENT_NOTICE_SUMMARY,
+                ipHash,
+                now
+        ));
+
+        List<WorkerInvitation> openInvites = invitationRepository.findByWorkerIdAndConsumedAtUtcIsNull(worker.getId());
+        for (WorkerInvitation inv : openInvites) {
+            inv.setConsumedAtUtc(now);
+        }
+        invitationRepository.saveAll(openInvites);
+
+        auditService.record(
+                "WORKER_REGISTERED_BY_ADMIN",
+                AuditActorType.ADMIN,
+                adminUserId,
+                worker.getId(),
+                Map.of(
+                        "workerCode", worker.getWorkerCode(),
+                        "provider", faceProvider.providerName(),
+                        "mockMode", faceProvider.isMock(),
+                        "consentVersion", effectiveConsentVersion
+                )
+        );
+
+        int activeSessions = sessionRepository.findByWorkerIdAndRevokedAtUtcIsNull(worker.getId()).size();
+        return new AdminWorkerEnrollmentOutcome(worker, activeSessions);
+    }
+
+    private Worker resolveWorkerForAdminEnrollment(
+            UUID workerId,
+            String workerCode,
+            String fullName,
+            String teamName,
+            LocalDate employmentStartDate,
+            Instant now
+    ) {
+        if (workerId != null) {
+            Worker existing = workerRepository.findById(workerId)
+                    .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker not found."));
+            if (existing.getStatus() == WorkerStatus.DISABLED) {
+                throw new ConflictException("WORKER_DISABLED", "Disabled workers cannot be enrolled.");
+            }
+            if (biometricRepository.findByWorkerId(existing.getId()).isPresent()) {
+                throw new ConflictException("BIOMETRICS_ALREADY_ENROLLED",
+                        "Biometrics already exist for this worker. Reset biometrics first to re-enroll.");
+            }
+            return existing;
+        }
+
+        if (workerCode == null || workerCode.isBlank()) {
+            throw new ValidationException("WORKER_CODE_REQUIRED", "Worker code is required for new worker registration.");
+        }
+        String normalizedCode = workerCode.trim().toUpperCase();
+        var existingOpt = workerRepository.findByWorkerCode(normalizedCode);
+        if (existingOpt.isPresent()) {
+            Worker existing = existingOpt.get();
+            if (existing.getStatus() == WorkerStatus.DISABLED) {
+                throw new ConflictException("WORKER_DISABLED", "Worker " + normalizedCode + " is disabled.");
+            }
+            if (biometricRepository.findByWorkerId(existing.getId()).isPresent()) {
+                throw new ConflictException("BIOMETRICS_ALREADY_ENROLLED",
+                        "Worker " + normalizedCode + " already has enrolled biometrics. Reset biometrics first to re-enroll.");
+            }
+            return existing;
+        }
+
+        Worker created = new Worker(
+                UUID.randomUUID(),
+                normalizedCode,
+                fullName.trim(),
+                (teamName == null || teamName.isBlank()) ? null : teamName.trim(),
+                WorkerStatus.REGISTERED,
+                employmentStartDate,
+                null,
+                now
+        );
+        return workerRepository.save(created);
+    }
+
+    private void enrollBiometricTemplate(Worker worker, String consentVersion, String imageBase64, Instant now) {
+        if (!faceProvider.isMock() && !properties.getBiometrics().isProductionEnabled()) {
+            throw new AppException(
+                    "PRODUCTION_BIOMETRICS_DISABLED",
+                    "Production biometric enrollment is currently disabled pending privacy and liveness approval.",
+                    HttpStatus.SERVICE_UNAVAILABLE
+            );
+        }
+        if (biometricRepository.findByWorkerId(worker.getId()).isPresent()) {
+            throw new ConflictException("BIOMETRICS_ALREADY_ENROLLED", "Biometrics already exist for this worker.");
+        }
+        byte[] imageBytes = imageValidator.decodeBase64(imageBase64);
+        FaceRecognitionProvider.ExtractionResult extraction = faceProvider.extractEmbedding(imageBytes);
+        BiometricEncryptionService.EncryptedTemplate encrypted = encryptionService.encrypt(extraction.embedding());
+
+        biometricRepository.save(new WorkerBiometric(
+                UUID.randomUUID(),
+                worker.getId(),
+                encrypted.ciphertext(),
+                encrypted.iv(),
+                encrypted.keyVersion(),
+                faceProvider.modelName(),
+                faceProvider.modelVersion(),
+                faceProvider.embeddingDimension(),
+                consentVersion,
+                now
+        ));
+    }
+
     private static String normalizeCode(String rawCode) {
         if (rawCode == null || rawCode.isBlank()) {
             throw new ValidationException("INVITATION_CODE_REQUIRED", "Invitation code is required.");
@@ -252,6 +387,12 @@ public class WorkerOnboardingService {
             String rawSessionToken,
             Duration sessionTtl,
             boolean mockBiometrics
+    ) {
+    }
+
+    public record AdminWorkerEnrollmentOutcome(
+            Worker worker,
+            int activeSessions
     ) {
     }
 }

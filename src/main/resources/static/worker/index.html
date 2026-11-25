@@ -45,15 +45,33 @@
         <p class="helper-text">Checking your session...</p>
       </section>
 
-      <!-- First Launch -->
+      <!-- First Launch / Direct Kiosk Attendance -->
       <section id="view-welcome" class="card" hidden>
-        <h2 class="section-heading">Welcome</h2>
-        <p class="helper-text" style="margin-bottom: 24px;">
-          Register once to mark your daily attendance.
+        <h2 class="section-heading">Mark Your Attendance</h2>
+        <p id="kiosk-workplace-meta" class="helper-text" style="margin-bottom: 14px;">
+          Registered workers can scan their face directly to record attendance.
         </p>
-        <button id="btn-start-register" type="button" class="btn btn-primary btn-block">
-          Register
+
+        <div id="kiosk-status-card" class="status-summary-card" style="margin-bottom: 16px;">
+          <div class="status-summary-row">
+            <span class="helper-text">Date</span>
+            <strong id="kiosk-date">-</strong>
+          </div>
+          <div class="status-summary-row">
+            <span class="helper-text">Shift start</span>
+            <strong id="kiosk-shift-info">-</strong>
+          </div>
+        </div>
+
+        <button id="btn-kiosk-mark-attendance" type="button" class="btn btn-primary btn-block btn-large">
+          Mark your attendance
         </button>
+
+        <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-subtle); text-align: center;">
+          <button id="btn-start-register" type="button" class="btn btn-ghost btn-block" style="min-height: 36px; font-size: 0.875rem;">
+            Have an invitation code? Register here
+          </button>
+        </div>
       </section>
 
       <!-- Step 1: Invitation Code -->

@@ -142,45 +142,101 @@ public class AttendanceCheckInService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public KioskStatusResponse getKioskStatus() {
+        AttendanceSettings settings = loadSettings();
+        Instant now = clock.instant();
+        LocalDate attendanceDate = calculator.resolveAttendanceDate(now, settings);
+        WorkCalendarDay calDay = calendarRepository.findByCalendarDate(attendanceDate).orElse(null);
+        AttendanceCalculator.EffectiveDayConfig dayConfig = calculator.resolveDayConfig(attendanceDate, calDay, settings);
+        return new KioskStatusResponse(
+                settings.getWorkplaceName(),
+                attendanceDate,
+                dayConfig.timezone().getId(),
+                dayConfig.dayType(),
+                dayConfig.shiftStartLocal().toString(),
+                dayConfig.gracePeriodMinutes()
+        );
+    }
+
     @Transactional
     public CheckInResponse checkIn(UUID actorWorkerId, UUID sessionId, String rawVerificationToken, String idempotencyKey) {
-        if (idempotencyKey == null || idempotencyKey.isBlank()) {
-            throw new ValidationException("IDEMPOTENCY_KEY_REQUIRED", "An idempotency key is required for check-in.");
-        }
-        String cleanIdemKey = idempotencyKey.trim();
+        String cleanIdemKey = requireIdempotencyKey(idempotencyKey);
 
-        // Idempotent replay check before consuming verification token
         Optional<AttendanceRecord> replayOpt = attendanceRepository.findByIdempotencyKey(cleanIdemKey);
         if (replayOpt.isPresent()) {
             AttendanceRecord existing = replayOpt.get();
             if (!actorWorkerId.equals(existing.getActorWorkerId())) {
                 throw new ConflictException("IDEMPOTENCY_CONFLICT", "This request key belongs to another worker.");
             }
-            AttendanceSettings settings = loadSettings();
-            ZoneId zone = calculator.resolveZone(settings);
-            Worker subject = workerRepository.findById(existing.getSubjectWorkerId()).orElseThrow();
-            Worker actor = workerRepository.findById(actorWorkerId).orElseThrow();
-            return new CheckInResponse(
-                    existing.getId(),
-                    subject.getId(),
-                    subject.getWorkerCode(),
-                    subject.getFullName(),
-                    actor.getId(),
-                    actor.getFullName(),
-                    existing.getAttendanceDate(),
-                    existing.getCheckInAtUtc(),
-                    calculator.formatLocalTime(existing.getCheckInAtUtc(), zone),
-                    zone.getId(),
-                    existing.getAttendanceStatus(),
-                    existing.getAttendanceMethod(),
-                    true
-            );
+            return buildReplayResponse(existing, actorWorkerId);
         }
 
+        BiometricVerificationToken bioToken = validateTokenForUse(rawVerificationToken);
+        if ("KIOSK".equalsIgnoreCase(bioToken.getVerificationMode())) {
+            throw new ForbiddenException("VERIFICATION_MODE_MISMATCH", "Use kiosk check-in for kiosk verification tokens.");
+        }
+        if (!bioToken.getActorWorkerId().equals(actorWorkerId)) {
+            throw new ForbiddenException("VERIFICATION_ACTOR_MISMATCH", "Verification token does not belong to the signed-in worker.");
+        }
+        return executeCheckIn(actorWorkerId, sessionId, bioToken, cleanIdemKey);
+    }
+
+    /**
+     * Completes a direct kiosk attendance check-in using a single-use KIOSK verification token
+     * without requiring a prior personal worker session cookie on the device.
+     */
+    @Transactional
+    public CheckInResponse kioskCheckIn(String rawVerificationToken, String idempotencyKey) {
+        String cleanIdemKey = requireIdempotencyKey(idempotencyKey);
+
+        Optional<AttendanceRecord> replayOpt = attendanceRepository.findByIdempotencyKey(cleanIdemKey);
+        if (replayOpt.isPresent()) {
+            AttendanceRecord existing = replayOpt.get();
+            UUID actorId = existing.getActorWorkerId() != null ? existing.getActorWorkerId() : existing.getSubjectWorkerId();
+            return buildReplayResponse(existing, actorId);
+        }
+
+        BiometricVerificationToken bioToken = validateTokenForUse(rawVerificationToken);
+        if (!"KIOSK".equalsIgnoreCase(bioToken.getVerificationMode())) {
+            throw new ForbiddenException("VERIFICATION_MODE_MISMATCH", "Invalid verification token mode for direct attendance.");
+        }
+        return executeCheckIn(bioToken.getSubjectWorkerId(), null, bioToken, cleanIdemKey);
+    }
+
+    private static String requireIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new ValidationException("IDEMPOTENCY_KEY_REQUIRED", "An idempotency key is required for check-in.");
+        }
+        return idempotencyKey.trim();
+    }
+
+    private CheckInResponse buildReplayResponse(AttendanceRecord existing, UUID actorWorkerId) {
+        AttendanceSettings settings = loadSettings();
+        ZoneId zone = calculator.resolveZone(settings);
+        Worker subject = workerRepository.findById(existing.getSubjectWorkerId()).orElseThrow();
+        Worker actor = workerRepository.findById(actorWorkerId).orElse(subject);
+        return new CheckInResponse(
+                existing.getId(),
+                subject.getId(),
+                subject.getWorkerCode(),
+                subject.getFullName(),
+                actor.getId(),
+                actor.getFullName(),
+                existing.getAttendanceDate(),
+                existing.getCheckInAtUtc(),
+                calculator.formatLocalTime(existing.getCheckInAtUtc(), zone),
+                zone.getId(),
+                existing.getAttendanceStatus(),
+                existing.getAttendanceMethod(),
+                true
+        );
+    }
+
+    private BiometricVerificationToken validateTokenForUse(String rawVerificationToken) {
         if (rawVerificationToken == null || rawVerificationToken.isBlank()) {
             throw new ValidationException("VERIFICATION_TOKEN_REQUIRED", "Face verification is required before marking attendance.");
         }
-
         String tokenHash = TokenHashUtil.sha256Hex(rawVerificationToken.trim());
         BiometricVerificationToken bioToken = verificationTokenRepository.findByTokenHash(tokenHash)
                 .orElseThrow(() -> new ValidationException("INVALID_VERIFICATION_TOKEN", "Face verification token is invalid."));
@@ -192,9 +248,16 @@ public class AttendanceCheckInService {
         if (!bioToken.getExpiresAtUtc().isAfter(now)) {
             throw new ValidationException("VERIFICATION_TOKEN_EXPIRED", "Face verification expired. Please scan again.");
         }
-        if (!bioToken.getActorWorkerId().equals(actorWorkerId)) {
-            throw new ForbiddenException("VERIFICATION_ACTOR_MISMATCH", "Verification token does not belong to the signed-in worker.");
-        }
+        return bioToken;
+    }
+
+    private CheckInResponse executeCheckIn(
+            UUID actorWorkerId,
+            UUID sessionId,
+            BiometricVerificationToken bioToken,
+            String cleanIdemKey
+    ) {
+        Instant now = clock.instant();
 
         Worker actor = workerRepository.findById(actorWorkerId)
                 .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Actor worker not found."));
@@ -379,6 +442,16 @@ public class AttendanceCheckInService {
             AttendanceStatus attendanceStatus,
             AttendanceMethod attendanceMethod,
             boolean idempotentReplay
+    ) {
+    }
+
+    public record KioskStatusResponse(
+            String workplaceName,
+            LocalDate attendanceDate,
+            String timezoneId,
+            DayType dayType,
+            String shiftStartLocal,
+            int gracePeriodMinutes
     ) {
     }
 }

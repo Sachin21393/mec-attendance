@@ -149,12 +149,78 @@
             <div class="toolbar">
               <div>
                 <h2 style="margin: 0;">Workers</h2>
-                <p class="helper-text">Manage invitations, registration status, and device sessions.</p>
+                <p class="helper-text">Manage invitations, admin-assisted photo enrollment, and device sessions.</p>
               </div>
-              <button id="btn-toggle-invite-form" type="button" class="btn btn-primary">+ Invite Worker</button>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button id="btn-toggle-enroll-form" type="button" class="btn btn-primary">+ Register Worker (Photo)</button>
+                <button id="btn-toggle-invite-form" type="button" class="btn btn-secondary">+ Invite Worker</button>
+              </div>
             </div>
 
             <div id="invite-created-banner" class="banner banner-success" hidden></div>
+
+            <form id="form-enroll-worker" class="inline-form-card" hidden>
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px;">
+                <div>
+                  <h3 style="margin: 0; font-size: 1rem;">Admin Assisted Worker Registration (Bulk / One-by-One)</h3>
+                  <p class="helper-text" style="margin: 2px 0 0;">Call each worker, enter their details, and capture or upload their face photo. Registered workers can mark attendance directly without an invite code.</p>
+                </div>
+                <button id="btn-enroll-close" type="button" class="btn btn-ghost" aria-label="Close registration panel">&times;</button>
+              </div>
+
+              <div id="enroll-error" class="banner banner-error" hidden></div>
+              <div id="enroll-batch-banner" class="banner banner-info" hidden></div>
+
+              <div class="enroll-photo-grid">
+                <div>
+                  <div class="field">
+                    <label for="enroll-existing-worker">Registration target</label>
+                    <select id="enroll-existing-worker" class="select">
+                      <option value="">Create new worker (enter details below)</option>
+                    </select>
+                  </div>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label for="enroll-worker-code">Worker code</label>
+                      <input id="enroll-worker-code" class="input" type="text" placeholder="e.g. W011" required>
+                    </div>
+                    <div class="field">
+                      <label for="enroll-worker-name">Full name</label>
+                      <input id="enroll-worker-name" class="input" type="text" placeholder="Worker full name" required>
+                    </div>
+                    <div class="field">
+                      <label for="enroll-worker-team">Team</label>
+                      <input id="enroll-worker-team" class="input" type="text" placeholder="e.g. Assembly">
+                    </div>
+                  </div>
+                  <label class="checkbox-row" style="margin: 8px 0 14px;">
+                    <input id="enroll-consent-checkbox" type="checkbox">
+                    <span>Worker reviewed the face attendance privacy notice and gave consent for encrypted template enrollment.</span>
+                  </label>
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button id="btn-enroll-submit" type="submit" class="btn btn-primary">Register &amp; Next Worker</button>
+                  </div>
+                </div>
+
+                <div class="enroll-photo-col">
+                  <div class="enroll-preview-wrap">
+                    <video id="enroll-video" autoplay playsinline muted hidden></video>
+                    <img id="enroll-preview-img" alt="Captured worker photo" hidden>
+                    <div id="enroll-photo-placeholder" class="enroll-photo-placeholder">
+                      Start live camera or upload/take a phone photo
+                    </div>
+                  </div>
+                  <canvas id="enroll-canvas" hidden></canvas>
+                  <input id="enroll-file-input" type="file" accept="image/*" capture="user" hidden>
+                  <div class="enroll-photo-actions">
+                    <button id="btn-enroll-start-cam" type="button" class="btn btn-secondary">Start Camera</button>
+                    <button id="btn-enroll-snap" type="button" class="btn btn-primary" hidden>Capture Photo</button>
+                    <button id="btn-enroll-upload" type="button" class="btn btn-secondary">Upload / Phone Photo</button>
+                    <button id="btn-enroll-clear-photo" type="button" class="btn btn-ghost" hidden>Retake / Clear</button>
+                  </div>
+                </div>
+              </div>
+            </form>
 
             <div class="toolbar-filters" style="margin-bottom: 14px;">
               <input id="workers-search" class="input" type="search" placeholder="Search code or name" style="max-width: 240px;">

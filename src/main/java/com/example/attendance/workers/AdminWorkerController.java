@@ -7,6 +7,7 @@ import com.example.attendance.auth.TokenHashUtil;
 import com.example.attendance.biometrics.WorkerBiometricRepository;
 import com.example.attendance.common.ConflictException;
 import com.example.attendance.common.ResourceNotFoundException;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -42,6 +43,7 @@ public class AdminWorkerController {
     private final WorkerInvitationRepository invitationRepository;
     private final WorkerBiometricRepository biometricRepository;
     private final WorkerSessionRepository sessionRepository;
+    private final WorkerOnboardingService onboardingService;
     private final AuditService auditService;
 
     public AdminWorkerController(
@@ -49,12 +51,14 @@ public class AdminWorkerController {
             WorkerInvitationRepository invitationRepository,
             WorkerBiometricRepository biometricRepository,
             WorkerSessionRepository sessionRepository,
+            WorkerOnboardingService onboardingService,
             AuditService auditService
     ) {
         this.workerRepository = workerRepository;
         this.invitationRepository = invitationRepository;
         this.biometricRepository = biometricRepository;
         this.sessionRepository = sessionRepository;
+        this.onboardingService = onboardingService;
         this.auditService = auditService;
     }
 
@@ -145,6 +149,28 @@ public class AdminWorkerController {
                 plaintextCode,
                 expiresAt
         );
+    }
+
+    @PostMapping("/enroll")
+    @ResponseStatus(HttpStatus.CREATED)
+    public WorkerSummaryDto enrollWorkerWithPhoto(
+            @Valid @RequestBody AdminEnrollWorkerRequest request,
+            @AuthenticationPrincipal AdminPrincipal admin,
+            HttpServletRequest httpRequest
+    ) {
+        WorkerOnboardingService.AdminWorkerEnrollmentOutcome outcome = onboardingService.enrollByAdmin(
+                admin != null ? admin.adminUserId() : null,
+                request.workerId(),
+                request.workerCode(),
+                request.fullName(),
+                request.teamName(),
+                request.employmentStartDate(),
+                request.consentGiven(),
+                request.consentVersion(),
+                request.imageBase64(),
+                httpRequest.getRemoteAddr()
+        );
+        return WorkerSummaryDto.from(outcome.worker(), true, outcome.activeSessions());
     }
 
     @PatchMapping("/{id}")
@@ -338,6 +364,18 @@ public class AdminWorkerController {
             WorkerSummaryDto worker,
             String invitationCode,
             Instant expiresAtUtc
+    ) {
+    }
+
+    public record AdminEnrollWorkerRequest(
+            UUID workerId,
+            @Size(max = 40) String workerCode,
+            @NotBlank(message = "Full name is required") @Size(max = 160) String fullName,
+            @Size(max = 100) String teamName,
+            LocalDate employmentStartDate,
+            boolean consentGiven,
+            @Size(max = 40) String consentVersion,
+            @NotBlank(message = "Face photo is required") String imageBase64
     ) {
     }
 }

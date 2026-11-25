@@ -27,6 +27,9 @@ function setGlobalError(msg) {
 
 function showTab(tab) {
   state.activeTab = tab;
+  if (tab !== 'workers') {
+    stopEnrollCamera();
+  }
   document.querySelectorAll('.nav-item').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
@@ -643,6 +646,7 @@ document.getElementById('form-admin-login').addEventListener('submit', async (e)
 });
 
 document.getElementById('btn-admin-logout').addEventListener('click', async () => {
+  stopEnrollCamera();
   await apiFetch('/api/v1/admin/auth/logout', { method: 'POST' }).catch(() => {});
   state.admin = null;
   appShell.hidden = true;
@@ -809,8 +813,295 @@ document.getElementById('reports-search').addEventListener('input', () => {
   reportsSearchTimer = setTimeout(loadReportsPreview, 250);
 });
 
+const enrollState = {
+  stream: null,
+  imageBase64: null,
+  batchCount: 0,
+  directory: []
+};
+
+function setEnrollError(msg) {
+  const el = document.getElementById('enroll-error');
+  if (!el) return;
+  if (!msg) {
+    el.hidden = true;
+    el.textContent = '';
+  } else {
+    el.textContent = msg;
+    el.hidden = false;
+  }
+}
+
+function updateEnrollPreviewUi() {
+  const video = document.getElementById('enroll-video');
+  const img = document.getElementById('enroll-preview-img');
+  const placeholder = document.getElementById('enroll-photo-placeholder');
+  const snapBtn = document.getElementById('btn-enroll-snap');
+  const clearBtn = document.getElementById('btn-enroll-clear-photo');
+
+  if (enrollState.imageBase64) {
+    img.src = `data:image/jpeg;base64,${enrollState.imageBase64}`;
+    img.hidden = false;
+    video.hidden = true;
+    placeholder.hidden = true;
+    snapBtn.hidden = true;
+    clearBtn.hidden = false;
+  } else if (enrollState.stream) {
+    img.hidden = true;
+    video.hidden = false;
+    placeholder.hidden = true;
+    snapBtn.hidden = false;
+    clearBtn.hidden = true;
+  } else {
+    img.hidden = true;
+    video.hidden = true;
+    placeholder.hidden = false;
+    snapBtn.hidden = true;
+    clearBtn.hidden = true;
+  }
+}
+
+function stopEnrollCamera() {
+  if (enrollState.stream) {
+    enrollState.stream.getTracks().forEach((t) => t.stop());
+    enrollState.stream = null;
+  }
+  const video = document.getElementById('enroll-video');
+  if (video) {
+    video.srcObject = null;
+  }
+  updateEnrollPreviewUi();
+}
+
+async function startEnrollCamera() {
+  setEnrollError('');
+  enrollState.imageBase64 = null;
+  stopEnrollCamera();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setEnrollError('Live webcam is unavailable here. Use "Upload / Phone Photo" instead.');
+    return;
+  }
+  try {
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false
+      });
+    } catch {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    }
+    enrollState.stream = stream;
+    const video = document.getElementById('enroll-video');
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+    updateEnrollPreviewUi();
+  } catch {
+    setEnrollError('Camera permission denied or unavailable. You can still use "Upload / Phone Photo".');
+  }
+}
+
+function compressFileToJpegBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read the selected photo.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Unsupported image format. Please choose a JPG or PNG photo.'));
+      img.onload = () => {
+        const maxSide = 1280;
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.getElementById('enroll-canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        resolve(dataUrl.split(',')[1]);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function refreshEnrollExistingSelect() {
+  try {
+    const page = await apiFetch('/api/v1/admin/workers?size=100');
+    enrollState.directory = page.content.filter((w) => !w.biometricsEnrolled && w.status !== 'DISABLED');
+    const sel = document.getElementById('enroll-existing-worker');
+    const currentVal = sel.value;
+    sel.innerHTML = '<option value="">Create new worker (enter details below)</option>';
+    enrollState.directory.forEach((w) => {
+      const opt = document.createElement('option');
+      opt.value = w.id;
+      opt.textContent = `${w.workerCode} — ${w.fullName}${w.teamName ? ' (' + w.teamName + ')' : ''} [${w.status}]`;
+      if (w.id === currentVal) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch {
+    // Non-fatal
+  }
+}
+
+document.getElementById('btn-toggle-enroll-form').addEventListener('click', async () => {
+  const form = document.getElementById('form-enroll-worker');
+  const inviteForm = document.getElementById('form-create-worker');
+  inviteForm.hidden = true;
+  form.hidden = !form.hidden;
+  if (!form.hidden) {
+    setEnrollError('');
+    await refreshEnrollExistingSelect();
+    updateEnrollPreviewUi();
+  } else {
+    stopEnrollCamera();
+  }
+});
+
+document.getElementById('btn-enroll-close').addEventListener('click', () => {
+  stopEnrollCamera();
+  document.getElementById('form-enroll-worker').hidden = true;
+});
+
+document.getElementById('enroll-existing-worker').addEventListener('change', (e) => {
+  const selectedId = e.target.value;
+  const codeInput = document.getElementById('enroll-worker-code');
+  const nameInput = document.getElementById('enroll-worker-name');
+  const teamInput = document.getElementById('enroll-worker-team');
+  const found = enrollState.directory.find((w) => w.id === selectedId);
+  if (found) {
+    codeInput.value = found.workerCode;
+    codeInput.disabled = true;
+    nameInput.value = found.fullName;
+    teamInput.value = found.teamName || '';
+  } else {
+    codeInput.disabled = false;
+    codeInput.value = '';
+    nameInput.value = '';
+    teamInput.value = '';
+  }
+});
+
+document.getElementById('btn-enroll-start-cam').addEventListener('click', startEnrollCamera);
+
+document.getElementById('btn-enroll-snap').addEventListener('click', () => {
+  const video = document.getElementById('enroll-video');
+  if (!video.videoWidth || !video.videoHeight) {
+    setEnrollError('Camera frame is not ready yet.');
+    return;
+  }
+  const canvas = document.getElementById('enroll-canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+  enrollState.imageBase64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+  setEnrollError('');
+  updateEnrollPreviewUi();
+});
+
+document.getElementById('btn-enroll-upload').addEventListener('click', () => {
+  document.getElementById('enroll-file-input').click();
+});
+
+document.getElementById('enroll-file-input').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  setEnrollError('');
+  try {
+    enrollState.imageBase64 = await compressFileToJpegBase64(file);
+    updateEnrollPreviewUi();
+  } catch (err) {
+    setEnrollError(err.message || 'Could not load image.');
+  }
+});
+
+document.getElementById('btn-enroll-clear-photo').addEventListener('click', () => {
+  enrollState.imageBase64 = null;
+  updateEnrollPreviewUi();
+});
+
+document.getElementById('form-enroll-worker').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  setEnrollError('');
+
+  const selectedId = document.getElementById('enroll-existing-worker').value || null;
+  const workerCode = document.getElementById('enroll-worker-code').value.trim();
+  const fullName = document.getElementById('enroll-worker-name').value.trim();
+  const teamName = document.getElementById('enroll-worker-team').value.trim() || null;
+  const consentGiven = document.getElementById('enroll-consent-checkbox').checked;
+
+  if (!selectedId && !workerCode) {
+    setEnrollError('Please enter a worker code (e.g. W011).');
+    return;
+  }
+  if (!fullName) {
+    setEnrollError('Please enter the worker’s full name.');
+    return;
+  }
+  if (!consentGiven) {
+    setEnrollError('Please confirm the worker gave consent before registering.');
+    return;
+  }
+  if (!enrollState.imageBase64) {
+    setEnrollError('Please capture or upload a face photo first.');
+    return;
+  }
+
+  const submitBtn = document.getElementById('btn-enroll-submit');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Enrolling face...';
+
+  try {
+    const enrolled = await apiFetch('/api/v1/admin/workers/enroll', {
+      method: 'POST',
+      body: {
+        workerId: selectedId,
+        workerCode: selectedId ? null : workerCode,
+        fullName,
+        teamName,
+        consentGiven: true,
+        imageBase64: enrollState.imageBase64
+      }
+    });
+
+    enrollState.batchCount += 1;
+    const batchBanner = document.getElementById('enroll-batch-banner');
+    batchBanner.textContent =
+      `Registered ${enrolled.fullName} (${enrolled.workerCode}) — ${enrollState.batchCount} worker(s) registered in this session. Ready for the next worker.`;
+    batchBanner.hidden = false;
+
+    const successBanner = document.getElementById('invite-created-banner');
+    successBanner.textContent = `Worker ${enrolled.fullName} (${enrolled.workerCode}) registered with face template.`;
+    successBanner.hidden = false;
+
+    // Reset form for next worker while keeping live camera open if already running
+    document.getElementById('enroll-existing-worker').value = '';
+    const codeInput = document.getElementById('enroll-worker-code');
+    codeInput.disabled = false;
+    codeInput.value = '';
+    document.getElementById('enroll-worker-name').value = '';
+    document.getElementById('enroll-worker-team').value = '';
+    document.getElementById('enroll-consent-checkbox').checked = false;
+    enrollState.imageBase64 = null;
+    updateEnrollPreviewUi();
+
+    await Promise.all([loadWorkersTable(), refreshEnrollExistingSelect()]);
+    codeInput.focus();
+  } catch (err) {
+    setEnrollError(err.message || 'Could not enroll worker photo.');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Register & Next Worker';
+  }
+});
+
 document.getElementById('btn-toggle-invite-form').addEventListener('click', () => {
   const form = document.getElementById('form-create-worker');
+  document.getElementById('form-enroll-worker').hidden = true;
+  stopEnrollCamera();
   form.hidden = !form.hidden;
 });
 

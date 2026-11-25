@@ -1,4 +1,4 @@
-const CACHE_NAME = 'workforce-attendance-shell-v2';
+const CACHE_NAME = 'workforce-attendance-shell-v4';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -16,7 +16,9 @@ const STATIC_ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(STATIC_ASSETS))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -49,6 +51,24 @@ self.addEventListener('fetch', (event) => {
 
   // Never cache API calls, biometric payloads, or authenticated admin routes
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/admin') || url.pathname.startsWith('/actuator')) {
+    return;
+  }
+
+  // Network-first for HTML, JS, and CSS so new deployments never serve mismatched shell versions
+  const isShellCode = url.pathname === '/' || url.pathname.endsWith('/') ||
+    url.pathname.endsWith('.html') || url.pathname.endsWith('.js') || url.pathname.endsWith('.css');
+  if (isShellCode) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.status === 200 && response.type === 'basic') {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
     return;
   }
 

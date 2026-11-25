@@ -2,10 +2,13 @@ package com.example.attendance.attendance;
 
 import com.example.attendance.auth.RateLimiterService;
 import com.example.attendance.auth.WorkerPrincipal;
+import com.example.attendance.biometrics.BiometricsVerificationService;
 import com.example.attendance.common.UnauthorizedException;
 import com.example.attendance.common.ValidationException;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,10 +28,16 @@ import java.util.List;
 public class AttendanceController {
 
     private final AttendanceCheckInService checkInService;
+    private final BiometricsVerificationService verificationService;
     private final RateLimiterService rateLimiterService;
 
-    public AttendanceController(AttendanceCheckInService checkInService, RateLimiterService rateLimiterService) {
+    public AttendanceController(
+            AttendanceCheckInService checkInService,
+            BiometricsVerificationService verificationService,
+            RateLimiterService rateLimiterService
+    ) {
         this.checkInService = checkInService;
+        this.verificationService = verificationService;
         this.rateLimiterService = rateLimiterService;
     }
 
@@ -82,9 +91,44 @@ public class AttendanceController {
         );
     }
 
+    @GetMapping("/kiosk/status")
+    public AttendanceCheckInService.KioskStatusResponse kioskStatus() {
+        return checkInService.getKioskStatus();
+    }
+
+    @PostMapping("/kiosk/verify")
+    public BiometricsVerificationService.KioskVerificationOutcome kioskVerify(
+            @Valid @RequestBody KioskVerifyRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        String key = "kiosk-verify:" + (httpRequest.getRemoteAddr() != null ? httpRequest.getRemoteAddr() : "unknown");
+        rateLimiterService.checkLimit(key, 30, Duration.ofMinutes(5));
+        return verificationService.verifyKiosk(request.workerCode(), request.imageBase64());
+    }
+
+    @PostMapping("/kiosk/check-in")
+    public AttendanceCheckInService.CheckInResponse kioskCheckIn(
+            @RequestHeader(value = "Idempotency-Key", required = false) String headerIdempotencyKey,
+            @Valid @RequestBody CheckInRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        String key = "kiosk-checkin:" + (httpRequest.getRemoteAddr() != null ? httpRequest.getRemoteAddr() : "unknown");
+        rateLimiterService.checkLimit(key, 30, Duration.ofMinutes(5));
+        String effectiveIdemKey = (request.idempotencyKey() != null && !request.idempotencyKey().isBlank())
+                ? request.idempotencyKey()
+                : headerIdempotencyKey;
+        return checkInService.kioskCheckIn(request.verificationToken(), effectiveIdemKey);
+    }
+
     public record CheckInRequest(
             @NotBlank(message = "Verification token is required") String verificationToken,
             String idempotencyKey
+    ) {
+    }
+
+    public record KioskVerifyRequest(
+            @Size(max = 40) String workerCode,
+            @NotBlank(message = "Image is required") String imageBase64
     ) {
     }
 }
