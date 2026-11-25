@@ -199,9 +199,99 @@
         </section>
 
         <section id="tab-settings" class="tab-panel" hidden>
+          <div id="settings-feedback" class="banner banner-success" hidden></div>
+
+          <div class="card" style="margin-bottom: 16px;">
+            <div class="toolbar">
+              <div>
+                <h2 style="margin: 0;">Calendar settings</h2>
+                <p id="cal-summary" class="helper-text">Configure working days, weekly offs, and holidays for the selected month.</p>
+              </div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button id="btn-cal-copy-prev" type="button" class="btn btn-secondary">Copy Prior Month Pattern</button>
+                <button id="btn-cal-save" type="button" class="btn btn-primary">Save Calendar</button>
+              </div>
+            </div>
+
+            <div class="weekly-pattern-bar">
+              <span class="helper-text" style="font-weight: 600;">Bulk weekly off days:</span>
+              <label class="pattern-chk"><input type="checkbox" name="weeklyOff" value="SUNDAY" checked> Sun</label>
+              <label class="pattern-chk"><input type="checkbox" name="weeklyOff" value="MONDAY"> Mon</label>
+              <label class="pattern-chk"><input type="checkbox" name="weeklyOff" value="TUESDAY"> Tue</label>
+              <label class="pattern-chk"><input type="checkbox" name="weeklyOff" value="WEDNESDAY"> Wed</label>
+              <label class="pattern-chk"><input type="checkbox" name="weeklyOff" value="THURSDAY"> Thu</label>
+              <label class="pattern-chk"><input type="checkbox" name="weeklyOff" value="FRIDAY"> Fri</label>
+              <label class="pattern-chk"><input type="checkbox" name="weeklyOff" value="SATURDAY"> Sat</label>
+              <button id="btn-cal-apply-weekly" type="button" class="btn btn-secondary">Apply Weekly Pattern</button>
+            </div>
+
+            <div id="cal-days-grid" class="cal-days-grid"></div>
+          </div>
+
           <div class="card">
-            <h2>Calendar &amp; System Settings</h2>
-            <p class="helper-text">Monthly working-day calendar editor, shift rules, and proxy cap settings will be enabled in PR 7.</p>
+            <h2 style="margin: 0 0 8px;">Workplace, Shift &amp; Proxy Settings</h2>
+            <p class="helper-text" style="margin-bottom: 16px;">
+              Changes are validated and audited. Proxy attendance limit counts successful proxy check-ins per actor per day; failed attempts are audited separately.
+            </p>
+            <form id="form-settings">
+              <div class="form-grid">
+                <div class="field">
+                  <label for="set-workplace-name">Workplace name</label>
+                  <input id="set-workplace-name" class="input" type="text" required>
+                </div>
+                <div class="field">
+                  <label for="set-timezone">Timezone (IANA)</label>
+                  <input id="set-timezone" class="input" type="text" list="tz-suggestions" required>
+                  <datalist id="tz-suggestions">
+                    <option value="Asia/Kolkata">
+                    <option value="UTC">
+                    <option value="Asia/Singapore">
+                    <option value="Europe/London">
+                    <option value="America/New_York">
+                  </datalist>
+                </div>
+                <div class="field">
+                  <label for="set-shift-start">Shift start time</label>
+                  <input id="set-shift-start" class="input" type="time" required>
+                </div>
+                <div class="field">
+                  <label for="set-grace-minutes">Grace period (minutes)</label>
+                  <input id="set-grace-minutes" class="input" type="number" min="0" max="240" required>
+                </div>
+                <div class="field">
+                  <label for="set-absence-cutoff">Absence cutoff time</label>
+                  <input id="set-absence-cutoff" class="input" type="time" required>
+                </div>
+                <div class="field">
+                  <label for="set-proxy-cap">Proxy attendance limit (per actor/day)</label>
+                  <input id="set-proxy-cap" class="input" type="number" min="0" max="100" required>
+                </div>
+              </div>
+
+              <label class="checkbox-row" style="margin: 8px 0 16px;">
+                <input id="set-proxy-enabled" type="checkbox">
+                <span>Allow workers to mark attendance for another present worker (Proxy attendance)</span>
+              </label>
+
+              <div id="tech-settings-box" class="inline-form-card">
+                <h3 style="margin: 0 0 6px; font-size: 0.95rem;">Technical Face Recognition Configuration (TECH_ADMIN only)</h3>
+                <p class="helper-text" style="margin-bottom: 12px;">
+                  Warning: Adjusting match thresholds changes false-accept / false-reject rates and requires validation on representative test data.
+                </p>
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="set-face-threshold">Cosine match threshold</label>
+                    <input id="set-face-threshold" class="input" type="number" step="0.001" min="0.05" max="0.99">
+                  </div>
+                  <div class="field">
+                    <label for="set-face-model-version">Face model version</label>
+                    <input id="set-face-model-version" class="input" type="text">
+                  </div>
+                </div>
+              </div>
+
+              <button type="submit" class="btn btn-primary">Save Settings</button>
+            </form>
           </div>
         </section>
 

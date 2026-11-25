@@ -408,6 +408,62 @@
   display: none;
 }
 
+.weekly-pattern-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+}
+
+.pattern-chk {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.cal-days-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.cal-day-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cal-day-card.day-WORKING { border-left: 4px solid var(--status-ontime-fg); }
+.cal-day-card.day-WEEKLY_OFF { border-left: 4px solid #64748B; background: #F8FAFC; }
+.cal-day-card.day-HOLIDAY { border-left: 4px solid var(--status-late-fg); background: #FFFBEB; }
+
+.cal-day-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.cal-day-card select,
+.cal-day-card input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-size: 0.8125rem;
+}
+
 @media (max-width: 900px) {
   .mobile-only {
     display: inline-flex;

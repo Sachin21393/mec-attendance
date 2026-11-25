@@ -38,6 +38,8 @@ function showTab(tab) {
 
   if (tab === 'workers') {
     loadWorkersTable();
+  } else if (tab === 'settings') {
+    loadCalendarAndSettings();
   }
 }
 
@@ -244,6 +246,75 @@ function shiftMonth(delta) {
   document.getElementById('input-month').value = state.month;
   state.page = 0;
   loadDashboardAndGrid();
+  if (state.activeTab === 'settings') {
+    loadCalendarAndSettings();
+  }
+}
+
+async function loadCalendarAndSettings() {
+  setGlobalError('');
+  try {
+    const [cal, s] = await Promise.all([
+      apiFetch(`/api/v1/admin/calendar?month=${encodeURIComponent(state.month)}`),
+      apiFetch('/api/v1/admin/settings')
+    ]);
+    renderCalendarEditor(cal);
+
+    document.getElementById('set-workplace-name').value = s.workplaceName;
+    document.getElementById('set-timezone').value = s.timezoneId;
+    document.getElementById('set-shift-start').value = s.shiftStartLocal.slice(0, 5);
+    document.getElementById('set-grace-minutes').value = s.gracePeriodMinutes;
+    document.getElementById('set-absence-cutoff').value = s.absenceCutoffLocal.slice(0, 5);
+    document.getElementById('set-proxy-cap').value = s.maxProxyPerActorPerDay;
+    document.getElementById('set-proxy-enabled').checked = !!s.proxyEnabled;
+
+    const threshInput = document.getElementById('set-face-threshold');
+    const modelInput = document.getElementById('set-face-model-version');
+    threshInput.value = s.faceMatchThreshold;
+    modelInput.value = s.faceModelVersion;
+    threshInput.disabled = !s.canEditBiometricConfig;
+    modelInput.disabled = !s.canEditBiometricConfig;
+  } catch (err) {
+    setGlobalError(err.message || 'Failed to load calendar and settings.');
+  }
+}
+
+function renderCalendarEditor(cal) {
+  document.getElementById('cal-summary').textContent =
+    `${cal.month} (${cal.timezoneId}) · ${cal.workingDaysCount} configured working days`;
+  const grid = document.getElementById('cal-days-grid');
+  grid.innerHTML = '';
+
+  cal.days.forEach((day) => {
+    const card = document.createElement('div');
+    card.className = `cal-day-card day-${day.dayType}`;
+    card.dataset.date = day.date;
+    const d = new Date(`${day.date}T00:00:00Z`);
+    const weekday = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+
+    card.innerHTML = `
+      <div class="cal-day-head">
+        <span>${escapeHtml(day.date)}</span>
+        <span>${weekday}</span>
+      </div>
+      <select class="cal-day-type" aria-label="Day type for ${escapeHtml(day.date)}">
+        <option value="WORKING" ${day.dayType === 'WORKING' ? 'selected' : ''}>Working</option>
+        <option value="WEEKLY_OFF" ${day.dayType === 'WEEKLY_OFF' ? 'selected' : ''}>Weekly Off</option>
+        <option value="HOLIDAY" ${day.dayType === 'HOLIDAY' ? 'selected' : ''}>Holiday</option>
+      </select>
+      <input class="cal-day-note" type="text" placeholder="Note (optional)" value="${escapeHtml(day.note || '')}">
+    `;
+    card.querySelector('.cal-day-type').addEventListener('change', (e) => {
+      card.className = `cal-day-card day-${e.target.value}`;
+    });
+    grid.appendChild(card);
+  });
+}
+
+function showSettingsFeedback(msg) {
+  const banner = document.getElementById('settings-feedback');
+  banner.textContent = msg;
+  banner.hidden = false;
 }
 
 function escapeHtml(str) {
@@ -313,6 +384,93 @@ document.getElementById('input-month').addEventListener('change', (e) => {
     state.month = e.target.value;
     state.page = 0;
     loadDashboardAndGrid();
+    if (state.activeTab === 'settings') {
+      loadCalendarAndSettings();
+    }
+  }
+});
+
+document.getElementById('btn-cal-save').addEventListener('click', async () => {
+  setGlobalError('');
+  const cards = Array.from(document.querySelectorAll('#cal-days-grid .cal-day-card'));
+  const days = cards.map((card) => ({
+    date: card.dataset.date,
+    dayType: card.querySelector('.cal-day-type').value,
+    note: card.querySelector('.cal-day-note').value.trim() || null
+  }));
+  try {
+    const updated = await apiFetch(`/api/v1/admin/calendar?month=${encodeURIComponent(state.month)}`, {
+      method: 'PUT',
+      body: { days }
+    });
+    renderCalendarEditor(updated);
+    showSettingsFeedback(`Saved ${updated.month} calendar (${updated.workingDaysCount} working days).`);
+    await loadDashboardAndGrid();
+  } catch (err) {
+    setGlobalError(err.message || 'Could not save calendar.');
+  }
+});
+
+document.getElementById('btn-cal-apply-weekly').addEventListener('click', async () => {
+  setGlobalError('');
+  const weeklyOffDays = Array.from(document.querySelectorAll('input[name="weeklyOff"]:checked'))
+    .map((chk) => chk.value);
+  try {
+    const updated = await apiFetch(`/api/v1/admin/calendar?month=${encodeURIComponent(state.month)}`, {
+      method: 'PUT',
+      body: { weeklyOffDays }
+    });
+    renderCalendarEditor(updated);
+    showSettingsFeedback(`Applied weekly off pattern to ${updated.month} (${updated.workingDaysCount} working days).`);
+    await loadDashboardAndGrid();
+  } catch (err) {
+    setGlobalError(err.message || 'Could not apply weekly pattern.');
+  }
+});
+
+document.getElementById('btn-cal-copy-prev').addEventListener('click', async () => {
+  setGlobalError('');
+  const [y, m] = state.month.split('-').map(Number);
+  const prev = new Date(Date.UTC(y, m - 2, 1));
+  const copyFromMonth = `${prev.getUTCFullYear()}-${String(prev.getUTCMonth() + 1).padStart(2, '0')}`;
+  try {
+    const updated = await apiFetch(`/api/v1/admin/calendar?month=${encodeURIComponent(state.month)}`, {
+      method: 'PUT',
+      body: { copyFromMonth }
+    });
+    renderCalendarEditor(updated);
+    showSettingsFeedback(`Copied pattern from ${copyFromMonth} to ${updated.month} (${updated.workingDaysCount} working days).`);
+    await loadDashboardAndGrid();
+  } catch (err) {
+    setGlobalError(err.message || 'Could not copy prior month pattern.');
+  }
+});
+
+document.getElementById('form-settings').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  setGlobalError('');
+  const threshInput = document.getElementById('set-face-threshold');
+  const modelInput = document.getElementById('set-face-model-version');
+  const body = {
+    workplaceName: document.getElementById('set-workplace-name').value.trim(),
+    timezoneId: document.getElementById('set-timezone').value.trim(),
+    shiftStartLocal: document.getElementById('set-shift-start').value,
+    gracePeriodMinutes: Number(document.getElementById('set-grace-minutes').value),
+    absenceCutoffLocal: document.getElementById('set-absence-cutoff').value,
+    proxyEnabled: document.getElementById('set-proxy-enabled').checked,
+    maxProxyPerActorPerDay: Number(document.getElementById('set-proxy-cap').value),
+    proxyCapCountsSuccessfulOnly: true
+  };
+  if (!threshInput.disabled) {
+    body.faceMatchThreshold = Number(threshInput.value);
+    body.faceModelVersion = modelInput.value.trim();
+  }
+  try {
+    await apiFetch('/api/v1/admin/settings', { method: 'PUT', body });
+    showSettingsFeedback('Workplace and attendance settings saved.');
+    await loadDashboardAndGrid();
+  } catch (err) {
+    setGlobalError(err.message || 'Could not save settings.');
   }
 });
 
