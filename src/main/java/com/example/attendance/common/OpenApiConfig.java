@@ -1,0 +1,19 @@
+package com.example.attendance.common;
+
+import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.info.Info;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class OpenApiConfig {
+
+    @Bean
+    public OpenAPI attendanceOpenApi() {
+        return new OpenAPI()
+                .info(new Info()
+                        .title("Workforce Attendance PWA API")
+                        .version("v1")
+                        .description("REST API for mobile-first worker attendance and responsive admin dashboard."));
+    }
+}

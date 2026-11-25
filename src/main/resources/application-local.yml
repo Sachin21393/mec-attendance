@@ -1,0 +1,17 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/attendance}
+    username: ${DB_USERNAME:attendance}
+    password: ${DB_PASSWORD:attendance_dev_pass}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    locations: classpath:db/migration,classpath:db/seed
+
+attendance:
+  biometrics:
+    # Local development fallback key only; never use in production
+    encryption-key-b64: ${BIOMETRICS_ENCRYPTION_KEY_B64:MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=}
+  bootstrap:
+    enabled: true
+    admin-username: ${ADMIN_BOOTSTRAP_USERNAME:admin}
+    admin-password: ${ADMIN_BOOTSTRAP_PASSWORD:ChangeMeLocalDev123!}
