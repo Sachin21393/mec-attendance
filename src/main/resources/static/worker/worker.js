@@ -6,16 +6,22 @@ const views = {
   invite: document.getElementById('view-invite'),
   consent: document.getElementById('view-consent'),
   manual: document.getElementById('view-manual-fallback'),
+  home: document.getElementById('view-home'),
   camera: document.getElementById('view-camera'),
-  home: document.getElementById('view-home')
+  result: document.getElementById('view-result')
 };
 
 const state = {
   biometricsConfig: null,
+  worker: null,
+  today: null,
+  cameraMode: 'register', // 'register' | 'self'
   invitationCode: '',
   consentVersion: '',
   fullName: '',
-  stream: null
+  stream: null,
+  busy: false,
+  pendingIdempotencyKey: null
 };
 
 function showView(name) {
@@ -35,7 +41,13 @@ function setBanner(id, message) {
   }
 }
 
+function setScanning(active) {
+  const wrap = document.getElementById('camera-frame-wrap');
+  wrap.classList.toggle('scanning', active);
+}
+
 function stopCamera() {
+  setScanning(false);
   if (state.stream) {
     state.stream.getTracks().forEach((t) => t.stop());
     state.stream = null;
@@ -88,8 +100,10 @@ function captureCanvasBase64() {
 }
 
 function buildSyntheticMockPayload() {
-  const marker = `MOCK_FACE_${state.invitationCode}_${Date.now()}`;
-  return btoa(marker);
+  if (state.cameraMode === 'register') {
+    return btoa(`MOCK_FACE_${state.invitationCode}`);
+  }
+  return btoa(`MOCK_FACE_${state.worker.workerCode}`);
 }
 
 function setupVoiceInput() {
@@ -114,42 +128,189 @@ function setupVoiceInput() {
   });
 }
 
-function showHome(worker, justRegistered = false) {
+function renderTodayStatus(today) {
+  state.today = today;
+  document.getElementById('home-workplace-date').textContent = `${today.attendanceDate} (${today.timezoneId})`;
+  const badge = document.getElementById('home-today-badge');
+  const detail = document.getElementById('home-status-detail');
+  const markBtn = document.getElementById('btn-mark-attendance');
+
+  if (today.alreadyMarked) {
+    const isLate = today.attendanceStatus === 'LATE';
+    badge.className = `status-badge ${isLate ? 'status-late' : 'status-ontime'}`;
+    badge.textContent = isLate ? `Late · ${today.checkInLocalTime}` : `Marked · ${today.checkInLocalTime}`;
+    detail.textContent = `You have already marked attendance today at ${today.checkInLocalTime}`;
+    markBtn.disabled = true;
+    markBtn.textContent = `Already marked at ${today.checkInLocalTime}`;
+  } else if (today.dayType !== 'WORKING') {
+    badge.className = 'status-badge status-holiday';
+    badge.textContent = today.dayType === 'HOLIDAY' ? 'Holiday' : 'Weekly off';
+    detail.textContent = 'No attendance check-in required on non-working days.';
+    markBtn.disabled = true;
+    markBtn.textContent = 'Non-working day';
+  } else {
+    badge.className = 'status-badge status-notdue';
+    badge.textContent = 'Not marked';
+    detail.textContent = `Shift starts at ${today.shiftStartLocal} (${today.gracePeriodMinutes} min grace period).`;
+    markBtn.disabled = false;
+    markBtn.textContent = 'Mark your attendance';
+  }
+}
+
+async function refreshHome(justRegistered = false) {
   stopCamera();
   document.getElementById('reg-success-banner').hidden = !justRegistered;
-  const firstName = (worker.fullName || 'Worker').split(' ')[0];
+  const firstName = (state.worker.fullName || 'Worker').split(' ')[0];
   document.getElementById('home-greeting').textContent = `Welcome, ${firstName}`;
   document.getElementById('home-worker-meta').textContent =
-    `${worker.fullName} (${worker.workerCode})${worker.teamName ? ' · ' + worker.teamName : ''}`;
+    `${state.worker.fullName} (${state.worker.workerCode})${state.worker.teamName ? ' · ' + state.worker.teamName : ''}`;
+  document.getElementById('home-offline-banner').hidden = navigator.onLine;
+
+  try {
+    const today = await apiFetch('/api/v1/attendance/today');
+    renderTodayStatus(today);
+  } catch {
+    // Keep home rendered even if offline
+  }
   showView('home');
 }
 
-async function submitRegistration(imageBase64) {
-  const btn = document.getElementById('btn-capture-register');
-  btn.disabled = true;
+function openCameraView(mode) {
+  state.cameraMode = mode;
+  state.pendingIdempotencyKey = mode === 'self' ? crypto.randomUUID() : null;
+  const heading = document.getElementById('camera-heading');
+  const guidance = document.getElementById('camera-guidance');
+  const actionBtn = document.getElementById('btn-capture-action');
+
+  if (mode === 'register') {
+    heading.textContent = 'Take your registration photo';
+    guidance.textContent = 'Place your face inside the frame in good lighting. Keep only one face in frame.';
+    actionBtn.textContent = 'Capture & Complete Registration';
+  } else {
+    heading.textContent = 'Place your face inside the frame';
+    guidance.textContent = 'Keep your face still for a moment in good lighting.';
+    actionBtn.textContent = 'Verify & Mark Attendance';
+  }
+
+  showView('camera');
+  startCamera();
+}
+
+function showAttendanceSuccess(data) {
+  stopCamera();
+  const icon = document.getElementById('result-icon-wrap');
+  icon.className = 'result-icon result-icon-success';
+  icon.innerHTML = '&#10003;';
+  document.getElementById('result-title').textContent = 'Attendance marked successfully';
+  document.getElementById('result-subtitle').textContent = state.biometricsConfig?.mockMode
+    ? 'Recorded in development mock-biometrics mode.'
+    : 'Your daily attendance has been recorded.';
+  document.getElementById('result-details').hidden = false;
+  document.getElementById('result-worker-name').textContent = `${data.subjectWorkerName} (${data.subjectWorkerCode})`;
+  document.getElementById('result-date').textContent = data.attendanceDate;
+  document.getElementById('result-time').textContent = `${data.checkInLocalTime} (${data.timezoneId})`;
+  const badge = document.getElementById('result-status-badge');
+  badge.className = `status-badge ${data.attendanceStatus === 'LATE' ? 'status-late' : 'status-ontime'}`;
+  badge.textContent = data.attendanceStatus === 'LATE' ? 'Late' : 'On time';
+  document.getElementById('result-method').textContent = data.attendanceMethod;
+  document.getElementById('btn-result-retry').hidden = true;
+  showView('result');
+}
+
+function showAttendanceFailure(message, allowRetry = true) {
+  stopCamera();
+  const icon = document.getElementById('result-icon-wrap');
+  icon.className = 'result-icon result-icon-error';
+  icon.textContent = '!';
+  document.getElementById('result-title').textContent = 'Attendance not recorded';
+  document.getElementById('result-subtitle').textContent = message;
+  document.getElementById('result-details').hidden = true;
+  document.getElementById('btn-result-retry').hidden = !allowRetry;
+  showView('result');
+}
+
+async function handleCameraCapture(imageBase64) {
+  if (state.busy) {
+    return;
+  }
+  if (!navigator.onLine) {
+    if (state.cameraMode === 'self') {
+      showAttendanceFailure("You're offline. Your attendance has not been recorded.", true);
+    } else {
+      setBanner('camera-error', "You're offline. Please connect to the internet and try again.");
+    }
+    return;
+  }
+
+  state.busy = true;
+  const actionBtn = document.getElementById('btn-capture-action');
+  const mockBtn = document.getElementById('btn-mock-capture');
+  actionBtn.disabled = true;
+  mockBtn.disabled = true;
   setBanner('camera-error', '');
+  setScanning(true);
+
   try {
-    const result = await apiFetch('/api/v1/workers/register', {
-      method: 'POST',
-      body: {
-        invitationCode: state.invitationCode,
-        fullName: state.fullName,
-        consentGiven: true,
-        consentVersion: state.consentVersion,
-        imageBase64,
-        deviceLabel: navigator.userAgent.slice(0, 80)
-      }
-    });
-    showHome(result, true);
+    if (state.cameraMode === 'register') {
+      document.getElementById('camera-guidance').textContent = 'Creating encrypted template...';
+      const result = await apiFetch('/api/v1/workers/register', {
+        method: 'POST',
+        body: {
+          invitationCode: state.invitationCode,
+          fullName: state.fullName,
+          consentGiven: true,
+          consentVersion: state.consentVersion,
+          imageBase64,
+          deviceLabel: navigator.userAgent.slice(0, 80)
+        }
+      });
+      state.worker = result;
+      await refreshHome(true);
+    } else {
+      document.getElementById('camera-guidance').textContent = 'Verifying your face...';
+      const verify = await apiFetch('/api/v1/biometrics/verify', {
+        method: 'POST',
+        body: {
+          mode: 'SELF',
+          imageBase64
+        }
+      });
+      const checkIn = await apiFetch('/api/v1/attendance/check-in', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': state.pendingIdempotencyKey },
+        body: {
+          verificationToken: verify.verificationToken,
+          idempotencyKey: state.pendingIdempotencyKey
+        }
+      });
+      showAttendanceSuccess(checkIn);
+    }
   } catch (err) {
-    setBanner('camera-error', err.message || 'Registration failed. Please try again.');
+    setScanning(false);
+    if (state.cameraMode === 'register') {
+      setBanner('camera-error', err.message || 'Registration failed. Please try again.');
+    } else if (err instanceof ApiError && err.code === 'ALREADY_MARKED') {
+      showAttendanceFailure(err.message, false);
+    } else {
+      setBanner('camera-error', err.message || "We couldn't verify your face. Please try again in better lighting.");
+      document.getElementById('camera-guidance').textContent = 'Place your face inside the frame and try again.';
+    }
   } finally {
-    btn.disabled = false;
+    state.busy = false;
+    actionBtn.disabled = false;
+    mockBtn.disabled = false;
   }
 }
 
 async function init() {
   setupVoiceInput();
+
+  window.addEventListener('online', () => {
+    document.getElementById('home-offline-banner').hidden = true;
+  });
+  window.addEventListener('offline', () => {
+    document.getElementById('home-offline-banner').hidden = false;
+  });
 
   try {
     state.biometricsConfig = await apiFetch('/api/v1/biometrics/config');
@@ -158,18 +319,14 @@ async function init() {
       document.getElementById('btn-mock-capture').hidden = false;
     }
   } catch {
-    // Non-fatal on initial load
+    // Non-fatal
   }
 
   try {
-    const me = await apiFetch('/api/v1/workers/me');
-    showHome(me, false);
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      showView('welcome');
-    } else {
-      showView('welcome');
-    }
+    state.worker = await apiFetch('/api/v1/workers/me');
+    await refreshHome(false);
+  } catch {
+    showView('welcome');
   }
 }
 
@@ -203,7 +360,7 @@ document.getElementById('form-invite').addEventListener('submit', async (e) => {
   }
 });
 
-document.getElementById('btn-consent-continue').addEventListener('click', async () => {
+document.getElementById('btn-consent-continue').addEventListener('click', () => {
   setBanner('consent-error', '');
   const name = document.getElementById('input-full-name').value.trim();
   const consented = document.getElementById('checkbox-consent').checked;
@@ -216,8 +373,7 @@ document.getElementById('btn-consent-continue').addEventListener('click', async 
     return;
   }
   state.fullName = name;
-  showView('camera');
-  await startCamera();
+  openCameraView('register');
 });
 
 document.getElementById('btn-decline-consent').addEventListener('click', async () => {
@@ -241,32 +397,49 @@ document.getElementById('btn-decline-consent').addEventListener('click', async (
 });
 
 document.getElementById('btn-manual-back').addEventListener('click', () => showView('welcome'));
+document.getElementById('btn-mark-attendance').addEventListener('click', () => {
+  if (!navigator.onLine) {
+    showAttendanceFailure("You're offline. Your attendance has not been recorded.", true);
+    return;
+  }
+  openCameraView('self');
+});
+
 document.getElementById('btn-retry-camera').addEventListener('click', startCamera);
 document.getElementById('btn-camera-cancel').addEventListener('click', () => {
   stopCamera();
-  showView('consent');
+  if (state.cameraMode === 'register') {
+    showView('consent');
+  } else {
+    refreshHome(false);
+  }
 });
 
-document.getElementById('btn-capture-register').addEventListener('click', async () => {
+document.getElementById('btn-capture-action').addEventListener('click', async () => {
   const img = captureCanvasBase64();
   if (!img) {
     setBanner('camera-error', 'No live camera frame available. Allow camera access and tap Retry Camera.');
     return;
   }
-  await submitRegistration(img);
+  await handleCameraCapture(img);
 });
 
 document.getElementById('btn-mock-capture').addEventListener('click', async () => {
-  await submitRegistration(buildSyntheticMockPayload());
+  await handleCameraCapture(buildSyntheticMockPayload());
 });
+
+document.getElementById('btn-result-retry').addEventListener('click', () => openCameraView('self'));
+document.getElementById('btn-result-done').addEventListener('click', () => refreshHome(false));
 
 document.getElementById('btn-switch-worker').addEventListener('click', async () => {
   await apiFetch('/api/v1/workers/logout', { method: 'POST' }).catch(() => {});
+  state.worker = null;
   showView('welcome');
 });
 
 document.getElementById('btn-revoke-device').addEventListener('click', async () => {
   await apiFetch('/api/v1/workers/device/revoke', { method: 'POST' }).catch(() => {});
+  state.worker = null;
   showView('welcome');
 });
 

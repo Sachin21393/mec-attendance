@@ -96,15 +96,53 @@
         <button id="btn-manual-back" type="button" class="btn btn-secondary btn-block">Back to start</button>
       </section>
 
-      <!-- Step 3: Face Capture for Registration -->
+      <!-- Returning Worker Home -->
+      <section id="view-home" class="card" hidden>
+        <div id="reg-success-banner" class="banner banner-success" hidden>
+          Registration complete! Next time you open this app, you can mark attendance with one tap.
+        </div>
+        <h2 id="home-greeting" class="section-heading">Welcome</h2>
+        <p id="home-worker-meta" class="helper-text" style="margin-bottom: 16px;"></p>
+
+        <div id="today-status-card" class="status-summary-card">
+          <div class="status-summary-row">
+            <span class="helper-text">Workplace date</span>
+            <strong id="home-workplace-date">-</strong>
+          </div>
+          <div class="status-summary-row">
+            <span class="helper-text">Today&apos;s status</span>
+            <span id="home-today-badge" class="status-badge status-notdue">Not marked</span>
+          </div>
+          <p id="home-status-detail" class="helper-text" style="margin-top: 8px;"></p>
+        </div>
+
+        <div id="home-offline-banner" class="banner banner-warn" hidden>
+          You&apos;re offline. Your attendance has not been recorded.
+        </div>
+
+        <button id="btn-mark-attendance" type="button" class="btn btn-primary btn-block btn-large">
+          Mark your attendance
+        </button>
+
+        <div class="home-secondary-actions">
+          <button id="btn-switch-worker" type="button" class="btn btn-ghost btn-block">
+            This isn&apos;t me
+          </button>
+          <button id="btn-revoke-device" type="button" class="btn btn-ghost btn-block">
+            Revoke this device session
+          </button>
+        </div>
+      </section>
+
+      <!-- Camera / Face Scanner (Registration & Attendance Check-in) -->
       <section id="view-camera" class="card" hidden>
-        <h2 class="section-heading">Take your registration photo</h2>
-        <p class="helper-text" style="margin-bottom: 12px;">
-          Place your face inside the frame in good lighting. Keep only one face in frame.
+        <h2 id="camera-heading" class="section-heading">Place your face inside the frame</h2>
+        <p id="camera-guidance" class="helper-text" style="margin-bottom: 12px;">
+          Keep your face still for a moment in good lighting. Keep only one face in frame.
         </p>
         <div id="camera-error" class="banner banner-error" hidden></div>
 
-        <div class="camera-frame-wrap">
+        <div id="camera-frame-wrap" class="camera-frame-wrap">
           <video id="camera-video" autoplay playsinline muted></video>
           <div id="face-oval" class="face-oval" aria-hidden="true">
             <svg viewBox="0 0 200 260" class="face-mesh-svg">
@@ -120,8 +158,8 @@
         <canvas id="camera-canvas" hidden></canvas>
 
         <div class="camera-actions">
-          <button id="btn-capture-register" type="button" class="btn btn-primary btn-block">
-            Capture &amp; Complete Registration
+          <button id="btn-capture-action" type="button" class="btn btn-primary btn-block">
+            Scan &amp; Mark Attendance
           </button>
           <button id="btn-retry-camera" type="button" class="btn btn-secondary btn-block">
             Retry Camera
@@ -135,24 +173,41 @@
         </div>
       </section>
 
-      <!-- Registration Success / Returning Worker -->
-      <section id="view-home" class="card" hidden>
-        <div id="reg-success-banner" class="banner banner-success" hidden>
-          Registration complete! Next time you open this app, you can mark attendance with one tap.
+      <!-- Attendance Confirmation / Failure Result Card -->
+      <section id="view-result" class="card" hidden>
+        <div id="result-icon-wrap" class="result-icon result-icon-success" aria-hidden="true">&#10003;</div>
+        <h2 id="result-title" class="section-heading" style="text-align: center;">Attendance marked successfully</h2>
+        <p id="result-subtitle" class="helper-text" style="text-align: center; margin-bottom: 16px;"></p>
+
+        <div id="result-details" class="status-summary-card">
+          <div class="status-summary-row">
+            <span class="helper-text">Worker</span>
+            <strong id="result-worker-name">-</strong>
+          </div>
+          <div class="status-summary-row">
+            <span class="helper-text">Date</span>
+            <strong id="result-date">-</strong>
+          </div>
+          <div class="status-summary-row">
+            <span class="helper-text">Time</span>
+            <strong id="result-time">-</strong>
+          </div>
+          <div class="status-summary-row">
+            <span class="helper-text">Status</span>
+            <span id="result-status-badge" class="status-badge status-ontime">ON_TIME</span>
+          </div>
+          <div class="status-summary-row">
+            <span class="helper-text">Method</span>
+            <strong id="result-method">SELF</strong>
+          </div>
         </div>
-        <h2 id="home-greeting" class="section-heading">Hello</h2>
-        <p id="home-worker-meta" class="helper-text" style="margin-bottom: 20px;"></p>
 
-        <button id="btn-mark-attendance" type="button" class="btn btn-primary btn-block" disabled>
-          Mark your attendance (Available in PR 4)
-        </button>
-
-        <div class="home-secondary-actions">
-          <button id="btn-switch-worker" type="button" class="btn btn-ghost btn-block">
-            This isn't me
+        <div class="camera-actions">
+          <button id="btn-result-retry" type="button" class="btn btn-primary btn-block" hidden>
+            Try Again
           </button>
-          <button id="btn-revoke-device" type="button" class="btn btn-ghost btn-block">
-            Revoke this device session
+          <button id="btn-result-done" type="button" class="btn btn-primary btn-block">
+            Done
           </button>
         </div>
       </section>

@@ -56,6 +56,11 @@
   line-height: 1.25;
 }
 
+.btn-large {
+  min-height: 56px;
+  font-size: 1.0625rem;
+}
+
 .name-input-row {
   display: flex;
   gap: 8px;
@@ -83,6 +88,56 @@
   height: 20px;
   margin-top: 2px;
   flex-shrink: 0;
+}
+
+.status-summary-card {
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.status-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.status-ontime {
+  background: var(--status-ontime-bg);
+  color: var(--status-ontime-fg);
+}
+
+.status-late {
+  background: var(--status-late-bg);
+  color: var(--status-late-fg);
+}
+
+.status-absent {
+  background: var(--status-absent-bg);
+  color: var(--status-absent-fg);
+}
+
+.status-holiday {
+  background: var(--status-holiday-bg);
+  color: var(--status-holiday-fg);
+}
+
+.status-notdue {
+  background: var(--status-notdue-bg);
+  color: var(--status-notdue-fg);
 }
 
 .camera-frame-wrap {
@@ -157,4 +212,26 @@
   flex-direction: column;
   gap: 8px;
   margin-top: 16px;
+}
+
+.result-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+.result-icon-success {
+  background: var(--status-ontime-bg);
+  color: var(--status-ontime-fg);
+}
+
+.result-icon-error {
+  background: var(--status-absent-bg);
+  color: var(--status-absent-fg);
 }
