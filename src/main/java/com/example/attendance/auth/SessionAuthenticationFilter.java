@@ -50,7 +50,9 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
             FilterChain filterChain
     ) throws ServletException, IOException {
         String path = request.getRequestURI();
-        if (SecurityContextHolder.getContext().getAuthentication() == null) {
+        if (isKioskBootOrShellPath(path)) {
+            revokeAndClearLegacyWorkerCookie(request, response);
+        } else if (SecurityContextHolder.getContext().getAuthentication() == null) {
             if (path.startsWith("/api/v1/admin")) {
                 authenticateAdmin(request);
             } else if (path.startsWith("/api/v1/workers")
@@ -60,6 +62,30 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
             }
         }
         filterChain.doFilter(request, response);
+    }
+
+    private static boolean isKioskBootOrShellPath(String path) {
+        return "/".equals(path)
+                || "/index.html".equals(path)
+                || "/worker".equals(path)
+                || path.startsWith("/worker/")
+                || "/service-worker.js".equals(path)
+                || "/api/v1/biometrics/config".equals(path)
+                || path.startsWith("/api/v1/attendance/kiosk/");
+    }
+
+    private void revokeAndClearLegacyWorkerCookie(HttpServletRequest request, HttpServletResponse response) {
+        cookieHelper.readCookie(request, CookieHelper.WORKER_SESSION_COOKIE).ifPresent(rawToken -> {
+            String hash = TokenHashUtil.sha256Hex(rawToken);
+            Instant now = Instant.now();
+            workerSessionRepository.findByTokenHash(hash)
+                    .filter(s -> s.getRevokedAtUtc() == null)
+                    .ifPresent(session -> {
+                        session.setRevokedAtUtc(now);
+                        workerSessionRepository.save(session);
+                    });
+            cookieHelper.clearSessionCookie(response, CookieHelper.WORKER_SESSION_COOKIE);
+        });
     }
 
     private void authenticateAdmin(HttpServletRequest request) {

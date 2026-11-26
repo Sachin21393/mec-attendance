@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -269,5 +270,46 @@ class AdminBulkEnrollAndKioskCheckInTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ALREADY_MARKED"))
                 .andExpect(jsonPath("$.message", org.hamcrest.Matchers.containsString("Deepak Kulkarni")));
+
+        // Legacy installed PWA holding a WORKER_SESSION cookie gets cleared & revoked automatically on kiosk/config boot
+        Cookie inviteCookie = mockMvc.perform(post("/api/v1/admin/workers")
+                        .cookie(adminCookie)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "workerCode", "W902",
+                                "fullName", "Legacy App User"
+                        ))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString()
+                .transform(json -> {
+                    try {
+                        String code = objectMapper.readTree(json).get("invitationCode").asText();
+                        String face902 = Base64.getEncoder().encodeToString("MOCK_FACE_W902".getBytes(StandardCharsets.UTF_8));
+                        return mockMvc.perform(post("/api/v1/workers/register")
+                                        .with(csrf())
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content(objectMapper.writeValueAsString(Map.of(
+                                                "invitationCode", code,
+                                                "fullName", "Legacy App User",
+                                                "consentGiven", true,
+                                                "consentVersion", "2026-11-v1",
+                                                "imageBase64", face902
+                                        ))))
+                                .andExpect(status().isOk())
+                                .andReturn().getResponse().getCookie(CookieHelper.WORKER_SESSION_COOKIE);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+
+        MvcResult cfgRes = mockMvc.perform(get("/api/v1/biometrics/config").cookie(inviteCookie))
+                .andExpect(status().isOk())
+                .andReturn();
+        assertThat(cfgRes.getResponse().getHeaders(HttpHeaders.SET_COOKIE))
+                .anyMatch(h -> h.contains(CookieHelper.WORKER_SESSION_COOKIE + "=") && h.contains("Max-Age=0"));
+
+        mockMvc.perform(get("/api/v1/workers/me").cookie(inviteCookie))
+                .andExpect(status().isUnauthorized());
     }
 }
