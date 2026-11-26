@@ -216,4 +216,78 @@ class WorkerManagementAndAuditTest {
         assertThat(auditNode.get("content").get(0).get("metadataJson").asText())
                 .contains("Supervisor log confirmed 09:30 arrival");
     }
+
+    @Test
+    void singleAndBulkWorkerDeleteRequireAdminPasswordAndReasonAndCleanDependencies() throws Exception {
+        Cookie adminCookie = loginAsAdmin();
+        UUID w001Id = UUID.fromString("10000000-0000-0000-0000-000000000001");
+        UUID w003Id = UUID.fromString("10000000-0000-0000-0000-000000000003");
+        UUID w004Id = UUID.fromString("10000000-0000-0000-0000-000000000004");
+
+        // Single delete rejects wrong admin password
+        mockMvc.perform(post("/api/v1/admin/workers/" + w001Id + "/delete")
+                        .with(csrf())
+                        .cookie(adminCookie)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "adminPassword", "WrongPassword!",
+                                "reason", "Left company"
+                        ))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_ADMIN_PASSWORD"));
+        assertThat(workerRepository.findById(w001Id)).isPresent();
+
+        // Single delete succeeds with correct admin password even when worker has proxy + self records
+        mockMvc.perform(post("/api/v1/admin/workers/" + w001Id + "/delete")
+                        .with(csrf())
+                        .cookie(adminCookie)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "adminPassword", "TestAdminPassword123!",
+                                "reason", "Resigned"
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deletedCount").value(1))
+                .andExpect(jsonPath("$.deletedWorkerCodes[0]").value("W001"));
+        assertThat(workerRepository.findById(w001Id)).isEmpty();
+        assertThat(biometricRepository.findByWorkerId(w001Id)).isEmpty();
+
+        // Bulk delete requires reason
+        mockMvc.perform(post("/api/v1/admin/workers/bulk-delete")
+                        .with(csrf())
+                        .cookie(adminCookie)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "workerIds", java.util.List.of(w003Id.toString(), w004Id.toString()),
+                                "reason", "",
+                                "adminPassword", "TestAdminPassword123!"
+                        ))))
+                .andExpect(status().isBadRequest());
+
+        // Bulk delete succeeds with valid reason and password
+        mockMvc.perform(post("/api/v1/admin/workers/bulk-delete")
+                        .with(csrf())
+                        .cookie(adminCookie)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "workerIds", java.util.List.of(w003Id.toString(), w004Id.toString()),
+                                "reason", "Contract ended",
+                                "adminPassword", "TestAdminPassword123!"
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deletedCount").value(2));
+        assertThat(workerRepository.findById(w003Id)).isEmpty();
+        assertThat(workerRepository.findById(w004Id)).isEmpty();
+
+        // Audit trail preserved for bulk deletion with reason
+        MvcResult auditRes = mockMvc.perform(get("/api/v1/admin/audit-events")
+                        .param("eventType", "WORKERS_BULK_DELETED")
+                        .cookie(adminCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andReturn();
+        assertThat(objectMapper.readTree(auditRes.getResponse().getContentAsString())
+                .get("content").get(0).get("metadataJson").asText())
+                .contains("Contract ended");
+    }
 }

@@ -10,6 +10,7 @@ import com.example.attendance.common.ResourceNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -44,6 +45,7 @@ public class AdminWorkerController {
     private final WorkerBiometricRepository biometricRepository;
     private final WorkerSessionRepository sessionRepository;
     private final WorkerOnboardingService onboardingService;
+    private final AdminWorkerDeletionService deletionService;
     private final AuditService auditService;
 
     public AdminWorkerController(
@@ -52,6 +54,7 @@ public class AdminWorkerController {
             WorkerBiometricRepository biometricRepository,
             WorkerSessionRepository sessionRepository,
             WorkerOnboardingService onboardingService,
+            AdminWorkerDeletionService deletionService,
             AuditService auditService
     ) {
         this.workerRepository = workerRepository;
@@ -59,6 +62,7 @@ public class AdminWorkerController {
         this.biometricRepository = biometricRepository;
         this.sessionRepository = sessionRepository;
         this.onboardingService = onboardingService;
+        this.deletionService = deletionService;
         this.auditService = auditService;
     }
 
@@ -254,6 +258,23 @@ public class AdminWorkerController {
         return Map.of("workerId", worker.getId(), "revokedSessions", revoked);
     }
 
+    @PostMapping("/{id}/delete")
+    public AdminWorkerDeletionService.DeleteWorkersOutcome deleteWorker(
+            @PathVariable UUID id,
+            @Valid @RequestBody DeleteWorkerRequest request,
+            @AuthenticationPrincipal AdminPrincipal admin
+    ) {
+        return deletionService.deleteSingle(admin, id, request.adminPassword(), request.reason());
+    }
+
+    @PostMapping("/bulk-delete")
+    public AdminWorkerDeletionService.DeleteWorkersOutcome bulkDeleteWorkers(
+            @Valid @RequestBody BulkDeleteWorkersRequest request,
+            @AuthenticationPrincipal AdminPrincipal admin
+    ) {
+        return deletionService.deleteBulk(admin, request.workerIds(), request.adminPassword(), request.reason());
+    }
+
     @PostMapping("/{id}/biometric-reset")
     @Transactional
     public CreateWorkerResponse resetBiometrics(
@@ -376,6 +397,19 @@ public class AdminWorkerController {
             boolean consentGiven,
             @Size(max = 40) String consentVersion,
             @NotBlank(message = "Face photo is required") String imageBase64
+    ) {
+    }
+
+    public record DeleteWorkerRequest(
+            @NotBlank(message = "Administrator password is required") String adminPassword,
+            @Size(max = 300) String reason
+    ) {
+    }
+
+    public record BulkDeleteWorkersRequest(
+            @NotEmpty(message = "Select at least one worker to delete") List<UUID> workerIds,
+            @NotBlank(message = "Reason for deletion is required") @Size(max = 300) String reason,
+            @NotBlank(message = "Administrator password is required") String adminPassword
     ) {
     }
 }

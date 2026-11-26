@@ -2,13 +2,40 @@ import { apiFetch } from '/shared/api.js';
 
 const state = {
   admin: null,
-  month: '2026-11',
+  month: new Date().toISOString().slice(0, 7),
   query: '',
   team: '',
   page: 0,
   size: 25,
   activeTab: 'dashboard'
 };
+
+const bannerTimers = new Map();
+
+function showTimedBanner(elementOrId, message, durationMs = 3000) {
+  const el = typeof elementOrId === 'string' ? document.getElementById(elementOrId) : elementOrId;
+  if (!el) return;
+  const existing = bannerTimers.get(el);
+  if (existing) {
+    clearTimeout(existing);
+    bannerTimers.delete(el);
+  }
+  if (!message) {
+    el.hidden = true;
+    el.textContent = '';
+    return;
+  }
+  el.textContent = message;
+  el.hidden = false;
+  if (durationMs > 0) {
+    const t = setTimeout(() => {
+      el.hidden = true;
+      el.textContent = '';
+      bannerTimers.delete(el);
+    }, durationMs);
+    bannerTimers.set(el, t);
+  }
+}
 
 const loginView = document.getElementById('admin-login-view');
 const appShell = document.getElementById('admin-app');
@@ -39,7 +66,9 @@ function showTab(tab) {
   });
   sidebar.classList.remove('open');
 
-  if (tab === 'workers') {
+  if (tab === 'dashboard' || tab === 'attendance') {
+    loadDashboardAndGrid();
+  } else if (tab === 'workers') {
     loadWorkersTable();
   } else if (tab === 'reports') {
     loadReportsPreview();
@@ -330,23 +359,90 @@ function openManualExceptionDrawer(workerId, fullName, workerCode, date) {
   });
 }
 
+const selectedWorkerIds = new Set();
+let loadedWorkers = [];
+let pendingDeleteTargets = [];
+let pendingDeleteBulk = false;
+
+function syncWorkersBulkUi() {
+  const bar = document.getElementById('workers-bulk-bar');
+  const countEl = document.getElementById('workers-selected-count');
+  const selectAll = document.getElementById('workers-select-all');
+  const count = selectedWorkerIds.size;
+  if (bar && countEl) {
+    countEl.textContent = `${count} selected`;
+    bar.hidden = count === 0;
+  }
+  if (selectAll) {
+    selectAll.checked = loadedWorkers.length > 0 && loadedWorkers.every((w) => selectedWorkerIds.has(w.id));
+  }
+}
+
+function openDeleteModal(workersList, isBulk) {
+  pendingDeleteTargets = workersList;
+  pendingDeleteBulk = isBulk;
+
+  const modal = document.getElementById('delete-worker-modal');
+  const title = document.getElementById('delete-modal-title');
+  const summary = document.getElementById('delete-modal-summary');
+  const reasonLabel = document.getElementById('delete-reason-label');
+  const reasonInput = document.getElementById('delete-reason-input');
+  const pwdInput = document.getElementById('delete-admin-password');
+  const errEl = document.getElementById('delete-modal-error');
+
+  errEl.hidden = true;
+  errEl.textContent = '';
+  reasonInput.value = '';
+  pwdInput.value = '';
+  reasonInput.required = isBulk;
+  reasonLabel.textContent = isBulk ? 'Reason for deletion (required)' : 'Reason for deletion (optional)';
+
+  if (isBulk) {
+    title.textContent = `Delete ${workersList.length} Selected Workers`;
+    const names = workersList.slice(0, 5).map((w) => `${w.fullName} (${w.workerCode})`).join(', ');
+    const extra = workersList.length > 5 ? ` and ${workersList.length - 5} more` : '';
+    summary.textContent = `Permanently delete ${names}${extra}? Their attendance records, biometric templates, and sessions will be removed. Audit history is retained.`;
+  } else {
+    const w = workersList[0];
+    title.textContent = `Delete Worker ${w.workerCode}`;
+    summary.textContent = `Permanently delete ${w.fullName} (${w.workerCode})? Their attendance records, biometric template, and sessions will be removed. Audit history is retained.`;
+  }
+
+  modal.hidden = false;
+  (isBulk ? reasonInput : pwdInput).focus();
+}
+
+function closeDeleteModal() {
+  document.getElementById('delete-worker-modal').hidden = true;
+  document.getElementById('delete-admin-password').value = '';
+  pendingDeleteTargets = [];
+}
+
 async function loadWorkersTable() {
   const tbody = document.getElementById('workers-tbody');
   const query = document.getElementById('workers-search')?.value.trim() || '';
   const status = document.getElementById('workers-status-filter')?.value || '';
-  tbody.innerHTML = '<tr><td colspan="7" class="helper-text">Loading workers...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" class="helper-text">Loading workers...</td></tr>';
   try {
     const page = await apiFetch(
       `/api/v1/admin/workers?size=100&query=${encodeURIComponent(query)}&status=${encodeURIComponent(status)}`
     );
+    loadedWorkers = page.content;
+    const validIds = new Set(loadedWorkers.map((w) => w.id));
+    Array.from(selectedWorkerIds).forEach((id) => {
+      if (!validIds.has(id)) selectedWorkerIds.delete(id);
+    });
+
     tbody.innerHTML = '';
     if (page.content.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" class="helper-text">No workers match the current filter.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="helper-text">No workers found. Register workers using "+ Register Worker (Photo)".</td></tr>';
+      syncWorkersBulkUi();
       return;
     }
     page.content.forEach((w) => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
+        <td><input type="checkbox" class="worker-select-cb" data-id="${w.id}" aria-label="Select ${escapeHtml(w.fullName)} (${escapeHtml(w.workerCode)})" ${selectedWorkerIds.has(w.id) ? 'checked' : ''}></td>
         <td><strong>${escapeHtml(w.workerCode)}</strong></td>
         <td>${escapeHtml(w.fullName)}</td>
         <td>${escapeHtml(w.teamName || '-')}</td>
@@ -358,10 +454,24 @@ async function loadWorkersTable() {
             <button type="button" class="btn btn-secondary btn-revoke-sess" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Revoke Sessions</button>
             <button type="button" class="btn btn-secondary btn-reset-bio" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Reset Face</button>
             ${w.status !== 'DISABLED' ? `<button type="button" class="btn btn-secondary btn-disable-w" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Disable</button>` : ''}
+            <button type="button" class="btn btn-danger-outline btn-delete-w" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Delete</button>
           </div>
         </td>
       `;
       tbody.appendChild(tr);
+    });
+
+    syncWorkersBulkUi();
+
+    tbody.querySelectorAll('.worker-select-cb').forEach((chk) => {
+      chk.addEventListener('change', (e) => {
+        if (e.target.checked) {
+          selectedWorkerIds.add(chk.dataset.id);
+        } else {
+          selectedWorkerIds.delete(chk.dataset.id);
+        }
+        syncWorkersBulkUi();
+      });
     });
 
     tbody.querySelectorAll('.btn-revoke-sess').forEach((btn) => {
@@ -381,9 +491,8 @@ async function loadWorkersTable() {
             method: 'POST',
             body: { reason: 'Admin biometric reset' }
           });
-          const banner = document.getElementById('invite-created-banner');
-          banner.textContent = `Biometric template cleared for ${res.worker.workerCode}. New one-time invitation code: ${res.invitationCode}`;
-          banner.hidden = false;
+          showTimedBanner('invite-created-banner',
+            `Biometric template cleared for ${res.worker.workerCode}. New one-time invitation code: ${res.invitationCode}`, 8000);
           await loadWorkersTable();
         } catch (err) {
           setGlobalError(err.message || 'Could not reset biometrics.');
@@ -400,8 +509,16 @@ async function loadWorkersTable() {
         }
       });
     });
+    tbody.querySelectorAll('.btn-delete-w').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const target = loadedWorkers.find((w) => w.id === btn.dataset.id);
+        if (target) {
+          openDeleteModal([target], false);
+        }
+      });
+    });
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="7" class="banner banner-error">${escapeHtml(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="banner banner-error">${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -525,8 +642,7 @@ async function downloadCsvExport() {
     a.click();
     a.remove();
     URL.revokeObjectURL(dlUrl);
-    feedback.textContent = `Downloaded attendance_${state.month}.csv`;
-    feedback.hidden = false;
+    showTimedBanner(feedback, `Downloaded attendance_${state.month}.csv`, 3000);
   } catch (err) {
     setGlobalError(err.message || 'Could not download CSV export.');
   } finally {
@@ -595,9 +711,7 @@ function renderCalendarEditor(cal) {
 }
 
 function showSettingsFeedback(msg) {
-  const banner = document.getElementById('settings-feedback');
-  banner.textContent = msg;
-  banner.hidden = false;
+  showTimedBanner('settings-feedback', msg, 3000);
 }
 
 function escapeHtml(str) {
@@ -617,6 +731,8 @@ async function enterApp(admin) {
 }
 
 async function init() {
+  const monthInput = document.getElementById('input-month');
+  if (monthInput) monthInput.value = state.month;
   try {
     const admin = await apiFetch('/api/v1/admin/auth/me');
     await enterApp(admin);
@@ -665,6 +781,10 @@ document.getElementById('btn-close-drawer').addEventListener('click', () => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    const modal = document.getElementById('delete-worker-modal');
+    if (modal && !modal.hidden) {
+      closeDeleteModal();
+    }
     const drawer = document.getElementById('detail-drawer');
     if (!drawer.hidden) {
       drawer.hidden = true;
@@ -799,6 +919,18 @@ document.getElementById('btn-page-prev').addEventListener('click', () => {
 document.getElementById('btn-page-next').addEventListener('click', () => {
   state.page++;
   loadDashboardAndGrid();
+});
+
+document.getElementById('btn-refresh-attendance').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-refresh-attendance');
+  btn.disabled = true;
+  btn.classList.add('spinning');
+  try {
+    await loadDashboardAndGrid();
+  } finally {
+    btn.classList.remove('spinning');
+    btn.disabled = false;
+  }
 });
 
 document.getElementById('btn-export-shortcut').addEventListener('click', () => {
@@ -1068,14 +1200,10 @@ document.getElementById('form-enroll-worker').addEventListener('submit', async (
     });
 
     enrollState.batchCount += 1;
-    const batchBanner = document.getElementById('enroll-batch-banner');
-    batchBanner.textContent =
-      `Registered ${enrolled.fullName} (${enrolled.workerCode}) — ${enrollState.batchCount} worker(s) registered in this session. Ready for the next worker.`;
-    batchBanner.hidden = false;
-
-    const successBanner = document.getElementById('invite-created-banner');
-    successBanner.textContent = `Worker ${enrolled.fullName} (${enrolled.workerCode}) registered with face template.`;
-    successBanner.hidden = false;
+    showTimedBanner('enroll-batch-banner',
+      `Registered ${enrolled.fullName} (${enrolled.workerCode}) — ${enrollState.batchCount} worker(s) registered in this session. Ready for the next worker.`, 3000);
+    showTimedBanner('invite-created-banner',
+      `Worker ${enrolled.fullName} (${enrolled.workerCode}) registered with face template.`, 3000);
 
     // Reset form for next worker while keeping live camera open if already running
     document.getElementById('enroll-existing-worker').value = '';
@@ -1140,12 +1268,102 @@ document.getElementById('form-create-worker').addEventListener('submit', async (
         teamName: document.getElementById('new-worker-team').value.trim() || null
       }
     });
-    banner.textContent = `Worker ${res.worker.workerCode} invited. One-time invitation code: ${res.invitationCode}`;
-    banner.hidden = false;
+    showTimedBanner(banner, `Worker ${res.worker.workerCode} invited. One-time invitation code: ${res.invitationCode}`, 8000);
     e.target.reset();
     await loadWorkersTable();
   } catch (err) {
     setGlobalError(err.message || 'Could not create worker invitation.');
+  }
+});
+
+document.getElementById('workers-select-all').addEventListener('change', (e) => {
+  if (e.target.checked) {
+    loadedWorkers.forEach((w) => selectedWorkerIds.add(w.id));
+  } else {
+    loadedWorkers.forEach((w) => selectedWorkerIds.delete(w.id));
+  }
+  document.querySelectorAll('.worker-select-cb').forEach((chk) => {
+    chk.checked = selectedWorkerIds.has(chk.dataset.id);
+  });
+  syncWorkersBulkUi();
+});
+
+document.getElementById('btn-clear-selection').addEventListener('click', () => {
+  selectedWorkerIds.clear();
+  document.querySelectorAll('.worker-select-cb').forEach((chk) => {
+    chk.checked = false;
+  });
+  syncWorkersBulkUi();
+});
+
+document.getElementById('btn-bulk-delete-workers').addEventListener('click', () => {
+  const targets = loadedWorkers.filter((w) => selectedWorkerIds.has(w.id));
+  if (targets.length > 0) {
+    openDeleteModal(targets, true);
+  }
+});
+
+document.getElementById('btn-delete-modal-close').addEventListener('click', closeDeleteModal);
+document.getElementById('btn-delete-cancel').addEventListener('click', closeDeleteModal);
+
+document.getElementById('form-delete-workers').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (pendingDeleteTargets.length === 0) {
+    closeDeleteModal();
+    return;
+  }
+  const errEl = document.getElementById('delete-modal-error');
+  errEl.hidden = true;
+  const reason = document.getElementById('delete-reason-input').value.trim();
+  const adminPassword = document.getElementById('delete-admin-password').value;
+
+  if (pendingDeleteBulk && !reason) {
+    errEl.textContent = 'Please enter a reason for bulk deletion.';
+    errEl.hidden = false;
+    return;
+  }
+  if (!adminPassword) {
+    errEl.textContent = 'Administrator password is required.';
+    errEl.hidden = false;
+    return;
+  }
+
+  const submitBtn = document.getElementById('btn-delete-confirm');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Deleting...';
+
+  try {
+    let result;
+    if (pendingDeleteBulk) {
+      result = await apiFetch('/api/v1/admin/workers/bulk-delete', {
+        method: 'POST',
+        body: {
+          workerIds: pendingDeleteTargets.map((w) => w.id),
+          reason,
+          adminPassword
+        }
+      });
+    } else {
+      result = await apiFetch(`/api/v1/admin/workers/${pendingDeleteTargets[0].id}/delete`, {
+        method: 'POST',
+        body: {
+          adminPassword,
+          reason: reason || null
+        }
+      });
+    }
+    const deletedIds = new Set(pendingDeleteTargets.map((w) => w.id));
+    deletedIds.forEach((id) => selectedWorkerIds.delete(id));
+    closeDeleteModal();
+    showTimedBanner('invite-created-banner',
+      `Deleted ${result.deletedCount} worker(s): ${result.deletedWorkerCodes.join(', ')}.`, 3000);
+    await Promise.all([loadWorkersTable(), refreshEnrollExistingSelect(), loadDashboardAndGrid()]);
+  } catch (err) {
+    errEl.textContent = err.message || 'Could not delete worker(s).';
+    errEl.hidden = false;
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Confirm Delete';
   }
 });
 

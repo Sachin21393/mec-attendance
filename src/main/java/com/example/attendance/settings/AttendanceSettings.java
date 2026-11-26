@@ -61,6 +61,39 @@ public class AttendanceSettings {
     protected AttendanceSettings() {
     }
 
+    public AttendanceSettings(
+            UUID id,
+            String workplaceName,
+            String timezoneId,
+            LocalTime defaultShiftStartLocal,
+            int defaultGracePeriodMinutes,
+            LocalTime defaultAbsenceCutoffLocal,
+            boolean proxyEnabled,
+            int maxProxyPerActorPerDay,
+            boolean proxyCapCountsSuccessfulOnly,
+            double faceMatchThreshold,
+            String faceModelVersion,
+            Instant effectiveFromUtc,
+            UUID updatedByAdminId,
+            Instant now
+    ) {
+        this.id = id;
+        this.workplaceName = workplaceName;
+        this.timezoneId = timezoneId;
+        this.defaultShiftStartLocal = defaultShiftStartLocal;
+        this.defaultGracePeriodMinutes = defaultGracePeriodMinutes;
+        this.defaultAbsenceCutoffLocal = defaultAbsenceCutoffLocal;
+        this.proxyEnabled = proxyEnabled;
+        this.maxProxyPerActorPerDay = maxProxyPerActorPerDay;
+        this.proxyCapCountsSuccessfulOnly = proxyCapCountsSuccessfulOnly;
+        this.faceMatchThreshold = faceMatchThreshold;
+        this.faceModelVersion = faceModelVersion;
+        this.effectiveFromUtc = effectiveFromUtc;
+        this.updatedByAdminId = updatedByAdminId;
+        this.createdAt = now;
+        this.updatedAt = now;
+    }
+
     public UUID getId() {
         return id;
     }
