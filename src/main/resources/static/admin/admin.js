@@ -450,10 +450,13 @@ async function loadWorkersTable() {
         <td>${w.biometricsEnrolled ? 'Enrolled' : 'Not enrolled'}</td>
         <td>${w.activeSessions}</td>
         <td>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            ${!w.biometricsEnrolled && w.status !== 'DISABLED' ? `<button type="button" class="btn btn-primary btn-enroll-row" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Enroll Face</button>` : ''}
+            ${w.biometricsEnrolled ? `<button type="button" class="btn btn-secondary btn-reset-bio" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Reset Face</button>` : ''}
             <button type="button" class="btn btn-secondary btn-revoke-sess" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Revoke Sessions</button>
-            <button type="button" class="btn btn-secondary btn-reset-bio" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Reset Face</button>
-            ${w.status !== 'DISABLED' ? `<button type="button" class="btn btn-secondary btn-disable-w" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Disable</button>` : ''}
+            ${w.status === 'DISABLED'
+              ? `<button type="button" class="btn btn-secondary btn-enable-w" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Re-enable</button>`
+              : `<button type="button" class="btn btn-secondary btn-disable-w" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Disable</button>`}
             <button type="button" class="btn btn-danger-outline btn-delete-w" data-id="${w.id}" style="min-height:34px;padding:4px 10px;font-size:0.8rem;">Delete</button>
           </div>
         </td>
@@ -471,6 +474,15 @@ async function loadWorkersTable() {
           selectedWorkerIds.delete(chk.dataset.id);
         }
         syncWorkersBulkUi();
+      });
+    });
+
+    tbody.querySelectorAll('.btn-enroll-row').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const target = loadedWorkers.find((w) => w.id === btn.dataset.id);
+        if (target) {
+          openEnrollCameraModal(target);
+        }
       });
     });
 
@@ -492,10 +504,22 @@ async function loadWorkersTable() {
             body: { reason: 'Admin biometric reset' }
           });
           showTimedBanner('invite-created-banner',
-            `Biometric template cleared for ${res.worker.workerCode}. New one-time invitation code: ${res.invitationCode}`, 8000);
+            `Face template cleared for ${res.worker.workerCode}. Click "Enroll Face" on their row to capture a new photo.`, 5000);
           await loadWorkersTable();
         } catch (err) {
           setGlobalError(err.message || 'Could not reset biometrics.');
+        }
+      });
+    });
+    tbody.querySelectorAll('.btn-enable-w').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        try {
+          const res = await apiFetch(`/api/v1/admin/workers/${btn.dataset.id}/enable`, { method: 'POST' });
+          showTimedBanner('invite-created-banner',
+            `Re-enabled ${res.fullName} (${res.workerCode}) (${res.status}).`, 3000);
+          await loadWorkersTable();
+        } catch (err) {
+          setGlobalError(err.message || 'Could not re-enable worker.');
         }
       });
     });
@@ -952,7 +976,9 @@ document.getElementById('reports-search').addEventListener('input', () => {
 const enrollState = {
   stream: null,
   imageBase64: null,
-  batchCount: 0
+  batchCount: 0,
+  targetWorker: null,
+  uploadFromModal: false
 };
 
 function setEnrollError(msg) {
@@ -1011,22 +1037,47 @@ function stopEnrollCamera() {
 
 function closeEnrollCameraModal() {
   stopEnrollCamera();
+  enrollState.targetWorker = null;
+  enrollState.uploadFromModal = false;
   const modal = document.getElementById('enroll-camera-modal');
   if (modal) {
     modal.hidden = true;
   }
 }
 
-async function openEnrollCameraModal() {
+async function openEnrollCameraModal(targetWorker = null) {
   setEnrollError('');
   setEnrollCamModalError('');
   stopEnrollCamera();
+  enrollState.targetWorker = targetWorker;
+  enrollState.uploadFromModal = false;
+
+  const titleEl = document.getElementById('enroll-cam-modal-title');
+  const consentRow = document.getElementById('enroll-cam-consent-row');
+  const consentChk = document.getElementById('enroll-cam-consent');
+  const uploadBtn = document.getElementById('btn-enroll-cam-upload');
+  const snapBtn = document.getElementById('btn-enroll-snap');
+
+  if (targetWorker) {
+    titleEl.textContent = `Enroll Face — ${targetWorker.fullName} (${targetWorker.workerCode})`;
+    consentRow.hidden = false;
+    consentChk.checked = false;
+    uploadBtn.hidden = false;
+    snapBtn.textContent = 'Picture & Save';
+  } else {
+    titleEl.textContent = 'Capture Worker Photo';
+    consentRow.hidden = true;
+    uploadBtn.hidden = true;
+    snapBtn.textContent = 'Picture';
+  }
 
   const modal = document.getElementById('enroll-camera-modal');
   modal.hidden = false;
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    setEnrollCamModalError('Live webcam is unavailable here. Close this dialog and use "Upload Photo" instead.');
+    setEnrollCamModalError(targetWorker
+      ? 'Live webcam is unavailable here. Click "Upload Photo" below instead.'
+      : 'Live webcam is unavailable here. Close this dialog and use "Upload Photo" instead.');
     return;
   }
   try {
@@ -1045,6 +1096,33 @@ async function openEnrollCameraModal() {
     await video.play().catch(() => {});
   } catch {
     setEnrollCamModalError('Camera permission denied or unavailable. You can still use "Upload Photo".');
+  }
+}
+
+async function submitRowFaceEnrollment(worker, imageBase64) {
+  const snapBtn = document.getElementById('btn-enroll-snap');
+  snapBtn.disabled = true;
+  snapBtn.textContent = 'Saving...';
+  try {
+    const enrolled = await apiFetch('/api/v1/admin/workers/enroll', {
+      method: 'POST',
+      body: {
+        workerId: worker.id,
+        fullName: worker.fullName,
+        teamName: worker.teamName,
+        consentGiven: true,
+        imageBase64
+      }
+    });
+    closeEnrollCameraModal();
+    showTimedBanner('invite-created-banner',
+      `Face enrolled for ${enrolled.fullName} (${enrolled.workerCode}).`, 3000);
+    await loadWorkersTable();
+  } catch (err) {
+    setEnrollCamModalError(err.message || 'Could not enroll worker face.');
+  } finally {
+    snapBtn.disabled = false;
+    snapBtn.textContent = enrollState.targetWorker ? 'Picture & Save' : 'Picture';
   }
 }
 
@@ -1093,11 +1171,26 @@ document.getElementById('btn-enroll-close').addEventListener('click', () => {
   document.getElementById('form-enroll-worker').hidden = true;
 });
 
-document.getElementById('btn-enroll-start-cam').addEventListener('click', openEnrollCameraModal);
+document.getElementById('btn-enroll-start-cam').addEventListener('click', () => openEnrollCameraModal(null));
 document.getElementById('btn-enroll-cam-close').addEventListener('click', closeEnrollCameraModal);
 document.getElementById('btn-enroll-cam-cancel').addEventListener('click', closeEnrollCameraModal);
 
-document.getElementById('btn-enroll-snap').addEventListener('click', () => {
+document.getElementById('btn-enroll-cam-upload').addEventListener('click', () => {
+  setEnrollCamModalError('');
+  if (enrollState.targetWorker && !document.getElementById('enroll-cam-consent').checked) {
+    setEnrollCamModalError('Please confirm the worker gave consent before enrolling.');
+    return;
+  }
+  enrollState.uploadFromModal = true;
+  document.getElementById('enroll-file-input').click();
+});
+
+document.getElementById('btn-enroll-snap').addEventListener('click', async () => {
+  setEnrollCamModalError('');
+  if (enrollState.targetWorker && !document.getElementById('enroll-cam-consent').checked) {
+    setEnrollCamModalError('Please confirm the worker gave consent before enrolling.');
+    return;
+  }
   const video = document.getElementById('enroll-video');
   if (!video.videoWidth || !video.videoHeight) {
     setEnrollCamModalError('Camera frame is not ready yet. Please wait a moment and try again.');
@@ -1107,26 +1200,47 @@ document.getElementById('btn-enroll-snap').addEventListener('click', () => {
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-  enrollState.imageBase64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+  const b64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+  if (enrollState.targetWorker) {
+    await submitRowFaceEnrollment(enrollState.targetWorker, b64);
+    return;
+  }
+  enrollState.imageBase64 = b64;
   closeEnrollCameraModal();
   setEnrollError('');
   updateEnrollPreviewUi();
 });
 
 document.getElementById('btn-enroll-upload').addEventListener('click', () => {
+  enrollState.uploadFromModal = false;
   document.getElementById('enroll-file-input').click();
 });
 
 document.getElementById('enroll-file-input').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   e.target.value = '';
-  if (!file) return;
-  setEnrollError('');
+  if (!file) {
+    enrollState.uploadFromModal = false;
+    return;
+  }
   try {
-    enrollState.imageBase64 = await compressFileToJpegBase64(file);
+    const b64 = await compressFileToJpegBase64(file);
+    if (enrollState.uploadFromModal && enrollState.targetWorker) {
+      enrollState.uploadFromModal = false;
+      await submitRowFaceEnrollment(enrollState.targetWorker, b64);
+      return;
+    }
+    enrollState.uploadFromModal = false;
+    setEnrollError('');
+    enrollState.imageBase64 = b64;
     updateEnrollPreviewUi();
   } catch (err) {
-    setEnrollError(err.message || 'Could not load image.');
+    if (enrollState.uploadFromModal) {
+      enrollState.uploadFromModal = false;
+      setEnrollCamModalError(err.message || 'Could not load image.');
+    } else {
+      setEnrollError(err.message || 'Could not load image.');
+    }
   }
 });
 

@@ -12,7 +12,7 @@ public class OpenApiConfig {
     public OpenAPI attendanceOpenApi() {
         return new OpenAPI()
                 .info(new Info()
-                        .title("Workforce Attendance PWA API")
+                        .title("MECATT Team Attendance API")
                         .version("v1")
                         .description("REST API for mobile-first worker attendance and responsive admin dashboard."));
     }

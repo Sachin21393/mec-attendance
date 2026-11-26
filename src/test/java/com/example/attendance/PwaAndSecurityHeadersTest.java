@@ -51,7 +51,7 @@ class PwaAndSecurityHeadersTest {
     void servesPwaManifestIconsServiceWorkerAndStaticPages() throws Exception {
         mockMvc.perform(get("/manifest.webmanifest"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.name").value("Workforce Attendance"))
+                .andExpect(jsonPath("$.name").value("MECATT Team"))
                 .andExpect(jsonPath("$.display").value("standalone"))
                 .andExpect(jsonPath("$.icons.length()").value(3));
 

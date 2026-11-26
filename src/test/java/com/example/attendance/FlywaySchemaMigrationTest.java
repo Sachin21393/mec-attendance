@@ -51,7 +51,7 @@ class FlywaySchemaMigrationTest {
 
         mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.info.title").value("Workforce Attendance PWA API"));
+                .andExpect(jsonPath("$.info.title").value("MECATT Team Attendance API"));
     }
 
     @Test

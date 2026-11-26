@@ -150,6 +150,14 @@ class WorkerManagementAndAuditTest {
         mockMvc.perform(get("/api/v1/workers/me").cookie(freshWorkerCookie))
                 .andExpect(status().isUnauthorized());
 
+        // Re-enable disabled worker restores REGISTERED when biometrics exist
+        mockMvc.perform(post("/api/v1/admin/workers/" + w009Id + "/enable")
+                        .with(csrf())
+                        .cookie(adminCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REGISTERED"))
+                .andExpect(jsonPath("$.biometricsEnrolled").value(true));
+
         // Update profile
         mockMvc.perform(patch("/api/v1/admin/workers/" + w009Id)
                         .with(csrf())

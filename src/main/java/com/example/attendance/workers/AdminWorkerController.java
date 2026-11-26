@@ -238,6 +238,32 @@ public class AdminWorkerController {
         return WorkerSummaryDto.from(worker, biometricRepository.findByWorkerId(worker.getId()).isPresent(), 0);
     }
 
+    @PostMapping("/{id}/enable")
+    @Transactional
+    public WorkerSummaryDto enableWorker(
+            @PathVariable UUID id,
+            @AuthenticationPrincipal AdminPrincipal admin
+    ) {
+        Worker worker = workerRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker not found."));
+        Instant now = Instant.now();
+        boolean biometricsEnrolled = biometricRepository.findByWorkerId(worker.getId()).isPresent();
+        worker.setStatus(biometricsEnrolled ? WorkerStatus.REGISTERED : WorkerStatus.INVITED);
+        worker.setUpdatedAt(now);
+        workerRepository.save(worker);
+
+        auditService.record(
+                "WORKER_ENABLED",
+                AuditActorType.ADMIN,
+                admin != null ? admin.adminUserId() : null,
+                worker.getId(),
+                Map.of("workerCode", worker.getWorkerCode(), "status", worker.getStatus().name())
+        );
+
+        int activeSessions = sessionRepository.findByWorkerIdAndRevokedAtUtcIsNull(worker.getId()).size();
+        return WorkerSummaryDto.from(worker, biometricsEnrolled, activeSessions);
+    }
+
     @PostMapping("/{id}/sessions/revoke")
     @Transactional
     public Map<String, Object> revokeSessions(

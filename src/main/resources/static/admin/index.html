@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Workforce Attendance — Admin Dashboard</title>
+  <title>MECATT Team — Admin Dashboard</title>
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/shared/styles.css">
   <link rel="stylesheet" href="/admin/admin.css">
@@ -13,8 +13,8 @@
   <main id="admin-login-view" class="login-shell">
     <section class="card login-card">
       <div class="brand-row" style="justify-content: center; margin-bottom: 16px;">
-        <span class="brand-badge" aria-hidden="true">WA</span>
-        <h1 style="margin: 0; font-size: 1.25rem;">Admin Dashboard</h1>
+        <span class="brand-badge" aria-hidden="true">MT</span>
+        <h1 style="margin: 0; font-size: 1.25rem;">MECATT Team</h1>
       </div>
       <p class="helper-text" style="text-align: center; margin-bottom: 20px;">
         Sign in with your administrator account.
@@ -42,9 +42,9 @@
     <aside id="admin-sidebar" class="sidebar" aria-label="Primary navigation">
       <div class="sidebar-top">
         <div class="brand-row">
-          <span class="brand-badge" aria-hidden="true">WA</span>
+          <span class="brand-badge" aria-hidden="true">MT</span>
           <div>
-            <div class="brand-name">Attendance</div>
+            <div class="brand-name">MECATT Team</div>
             <div class="brand-sub">Admin Console</div>
           </div>
         </div>
@@ -71,7 +71,7 @@
         <div class="topbar-left">
           <button id="btn-open-nav" type="button" class="btn btn-secondary mobile-only" aria-label="Open navigation">Menu</button>
           <div>
-            <h1 id="topbar-workplace" class="topbar-title">Workforce Attendance</h1>
+            <h1 id="topbar-workplace" class="topbar-title">MECATT Team</h1>
             <span id="topbar-timezone" class="tz-pill">Timezone: -</span>
           </div>
         </div>
@@ -499,9 +499,16 @@
         <div class="enroll-preview-wrap" style="margin-bottom: 14px;">
           <video id="enroll-video" autoplay playsinline muted></video>
         </div>
-        <div style="display: flex; justify-content: flex-end; gap: 8px;">
-          <button id="btn-enroll-cam-cancel" type="button" class="btn btn-secondary">Cancel</button>
-          <button id="btn-enroll-snap" type="button" class="btn btn-primary">Picture</button>
+        <label id="enroll-cam-consent-row" class="checkbox-row" style="margin: 0 0 12px;" hidden>
+          <input id="enroll-cam-consent" type="checkbox">
+          <span>Worker reviewed the privacy notice and consented to face template enrollment.</span>
+        </label>
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <button id="btn-enroll-cam-upload" type="button" class="btn btn-ghost" hidden>Upload Photo</button>
+          <div style="display: flex; gap: 8px; margin-left: auto;">
+            <button id="btn-enroll-cam-cancel" type="button" class="btn btn-secondary">Cancel</button>
+            <button id="btn-enroll-snap" type="button" class="btn btn-primary">Picture</button>
+          </div>
         </div>
       </div>
     </div>
