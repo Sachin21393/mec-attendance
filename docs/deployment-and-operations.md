@@ -9,6 +9,20 @@
 
 ---
 
+## 2A. Deploying on Render Free Tier (Blueprint)
+
+This repository includes [render.yaml](../render.yaml) and [deploy/docker-entrypoint.sh](../deploy/docker-entrypoint.sh) for one-step Blueprint deployment on Render:
+
+1. Push this repository to a GitHub/GitLab repository.
+2. In the Render Dashboard, choose **New + → Blueprint** and connect the repository.
+3. Render reads `render.yaml`, creates `workforce-attendance` (Docker Free Web Service) and `workforce-attendance-db` (Free PostgreSQL), downloads the YuNet/SFace ONNX models during image build, converts `DATABASE_URL` into JDBC settings at startup, and generates `BIOMETRICS_ENCRYPTION_KEY_B64`.
+4. When prompted for `ADMIN_BOOTSTRAP_PASSWORD`, enter a strong administrator password.
+5. After deploy finishes (`GET /actuator/health` → `{"status":"UP"}`), open `https://<your-service>.onrender.com/admin/` to register workers, and set `ADMIN_BOOTSTRAP_ENABLED=false` in the Render Environment tab once your initial admin user is created.
+
+> **Free Tier Caveats:** Render free web services spin down after 15 minutes of inactivity (~30–60s cold start), and Render Free PostgreSQL databases expire after 30 days unless upgraded or backed up with `pg_dump`.
+
+---
+
 ## 2. Production Deployment Steps
 
 1. **Provision PostgreSQL 16** with TLS enabled and automated encrypted snapshots.

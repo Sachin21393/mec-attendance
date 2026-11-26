@@ -14,12 +14,21 @@ WORKDIR /app
 
 RUN groupadd --system app && useradd --system --gid app app
 COPY --from=build /workspace/target/workforce-attendance-*.jar /app/app.jar
-RUN mkdir -p /app/models && chown -R app:app /app
+COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
+
+RUN mkdir -p /app/models \
+    && curl -fsSL -o /app/models/face_detection_yunet_2023mar.onnx \
+       "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx" \
+    && curl -fsSL -o /app/models/face_recognition_sface_2021dec.onnx \
+       "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx" \
+    && sed -i 's/\r$//' /app/docker-entrypoint.sh \
+    && chmod +x /app/docker-entrypoint.sh \
+    && chown -R app:app /app
 
 USER app
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
-  CMD ["sh", "-c", "curl -fsS http://localhost:8080/actuator/health || exit 1"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD sh -c 'curl -fsS "http://localhost:${PORT:-8080}/actuator/health" || exit 1'
 
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

@@ -9,7 +9,9 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
 
@@ -28,12 +30,36 @@ public class BiometricEncryptionService {
         if (keyB64 == null || keyB64.isBlank()) {
             throw new IllegalStateException("BIOMETRICS_ENCRYPTION_KEY_B64 must be configured");
         }
-        byte[] keyBytes = Base64.getDecoder().decode(keyB64.trim());
-        if (keyBytes.length != 16 && keyBytes.length != 24 && keyBytes.length != 32) {
-            throw new IllegalStateException("BIOMETRICS_ENCRYPTION_KEY_B64 must decode to 16, 24, or 32 bytes");
-        }
+        byte[] keyBytes = resolveAesKeyBytes(keyB64.trim());
         this.secretKey = new SecretKeySpec(keyBytes, "AES");
         this.keyVersion = properties.getBiometrics().getKeyVersion();
+    }
+
+    private static byte[] resolveAesKeyBytes(String rawSecret) {
+        try {
+            byte[] std = Base64.getDecoder().decode(rawSecret);
+            if (std.length == 16 || std.length == 24 || std.length == 32) {
+                return std;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Try URL-safe base64 or high-entropy generated secret fallback below
+        }
+        try {
+            byte[] urlSafe = Base64.getUrlDecoder().decode(rawSecret);
+            if (urlSafe.length == 16 || urlSafe.length == 24 || urlSafe.length == 32) {
+                return urlSafe;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Try high-entropy secret derivation below
+        }
+        if (rawSecret.length() >= 24) {
+            try {
+                return MessageDigest.getInstance("SHA-256").digest(rawSecret.getBytes(StandardCharsets.UTF_8));
+            } catch (GeneralSecurityException e) {
+                throw new IllegalStateException("Failed to derive AES-256 key", e);
+            }
+        }
+        throw new IllegalStateException("BIOMETRICS_ENCRYPTION_KEY_B64 must decode to 16, 24, or 32 bytes (or be a secret >= 24 chars)");
     }
 
     public EncryptedTemplate encrypt(float[] embedding) {
