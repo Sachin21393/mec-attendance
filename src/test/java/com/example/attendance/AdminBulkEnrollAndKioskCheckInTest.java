@@ -620,5 +620,40 @@ class AdminBulkEnrollAndKioskCheckInTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.actionType").value("LOGOUT"))
                 .andExpect(jsonPath("$.subjectWorkerCode").value("W903"));
+
+        // Disabling geofencing via settings removes location restriction while keeping saved coordinates
+        mockMvc.perform(put("/api/v1/admin/settings")
+                        .cookie(adminCookie)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.ofEntries(
+                                Map.entry("workplaceName", "MEC Team"),
+                                Map.entry("timezoneId", "Asia/Kolkata"),
+                                Map.entry("shiftStartLocal", "00:00"),
+                                Map.entry("gracePeriodMinutes", 15),
+                                Map.entry("absenceCutoffLocal", "23:59"),
+                                Map.entry("shiftEndLocal", "23:59"),
+                                Map.entry("proxyEnabled", true),
+                                Map.entry("maxProxyPerActorPerDay", 1),
+                                Map.entry("geofenceEnabled", false)
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.geofenceEnabled").value(false))
+                .andExpect(jsonPath("$.geofenceLatitude").value(19.076090));
+
+        mockMvc.perform(get("/api/v1/attendance/kiosk/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.geofenceEnabled").value(false));
+
+        mockMvc.perform(post("/api/v1/attendance/kiosk/location-check")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "latitude", 19.077440,
+                                "longitude", 72.877426
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true))
+                .andExpect(jsonPath("$.geofenceEnabled").value(false));
     }
 }

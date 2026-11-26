@@ -396,10 +396,18 @@
               </label>
 
               <div class="inline-form-card" style="margin: 0 0 16px;">
-                <h3 style="margin: 0 0 6px; font-size: 0.95rem;">Office Geofencing (Location Restriction)</h3>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px;">
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <h3 style="margin: 0; font-size: 0.95rem;">Office Geofencing (Location Restriction)</h3>
+                    <span id="geofence-state-badge" class="status-badge status-notdue">Disabled</span>
+                  </div>
+                  <button id="btn-toggle-geofence" type="button" class="btn btn-secondary" style="min-height: 34px; padding: 5px 12px; font-size: 0.8125rem;">
+                    Disable Geofencing
+                  </button>
+                </div>
                 <label class="checkbox-row" style="margin: 6px 0 12px;">
                   <input id="set-geofence-enabled" type="checkbox">
-                  <span>Enforce office geofence (only allow attendance inside configured radius)</span>
+                  <span>Enforce office geofence (uncheck or click Disable Geofencing to turn off location restriction)</span>
                 </label>
                 <div class="form-grid">
                   <div class="field">
@@ -412,7 +420,7 @@
                   </div>
                   <div class="field">
                     <label for="set-geofence-radius">Allowed radius (meters)</label>
-                    <input id="set-geofence-radius" class="input" type="number" min="5" max="50000" value="50" required>
+                    <input id="set-geofence-radius" class="input" type="number" min="5" max="50000" value="50">
                   </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px;">
