@@ -49,6 +49,18 @@ public class AttendanceSettings {
     @Column(name = "face_model_version", nullable = false, length = 80)
     private String faceModelVersion;
 
+    @Column(name = "geofence_enabled", nullable = false)
+    private boolean geofenceEnabled = false;
+
+    @Column(name = "geofence_latitude")
+    private Double geofenceLatitude;
+
+    @Column(name = "geofence_longitude")
+    private Double geofenceLongitude;
+
+    @Column(name = "geofence_radius_meters", nullable = false)
+    private int geofenceRadiusMeters = 50;
+
     @Column(name = "effective_from_utc", nullable = false)
     private Instant effectiveFromUtc;
 
@@ -188,6 +200,38 @@ public class AttendanceSettings {
 
     public void setFaceModelVersion(String faceModelVersion) {
         this.faceModelVersion = faceModelVersion;
+    }
+
+    public boolean isGeofenceEnabled() {
+        return geofenceEnabled;
+    }
+
+    public void setGeofenceEnabled(boolean geofenceEnabled) {
+        this.geofenceEnabled = geofenceEnabled;
+    }
+
+    public Double getGeofenceLatitude() {
+        return geofenceLatitude;
+    }
+
+    public void setGeofenceLatitude(Double geofenceLatitude) {
+        this.geofenceLatitude = geofenceLatitude;
+    }
+
+    public Double getGeofenceLongitude() {
+        return geofenceLongitude;
+    }
+
+    public void setGeofenceLongitude(Double geofenceLongitude) {
+        this.geofenceLongitude = geofenceLongitude;
+    }
+
+    public int getGeofenceRadiusMeters() {
+        return geofenceRadiusMeters;
+    }
+
+    public void setGeofenceRadiusMeters(int geofenceRadiusMeters) {
+        this.geofenceRadiusMeters = geofenceRadiusMeters;
     }
 
     public Instant getEffectiveFromUtc() {

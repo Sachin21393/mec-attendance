@@ -407,4 +407,218 @@ class AdminBulkEnrollAndKioskCheckInTest {
                 .andReturn().getResponse().getContentAsString();
         assertThat(csvContent).contains("Early Logout", "Extended Work Hours");
     }
+
+    @Test
+    void geofenceBlocksOutsideZoneAndAllowsConfiguredRadius() throws Exception {
+        Cookie adminCookie = loginAsAdmin();
+        AttendanceSettings settings = settingsRepository.findTopByOrderByEffectiveFromUtcDesc().orElseThrow();
+        LocalDate workplaceToday = calculator.resolveAttendanceDate(Instant.now(), settings);
+        calendarRepository.findByCalendarDate(workplaceToday).ifPresentOrElse(day -> {
+            day.setDayType(DayType.WORKING);
+            day.setShiftStartLocal(LocalTime.of(0, 0));
+            day.setGracePeriodMinutes(15);
+            day.setAbsenceCutoffLocal(LocalTime.of(23, 59));
+            day.setShiftEndLocal(LocalTime.of(23, 59));
+            calendarRepository.save(day);
+        }, () -> calendarRepository.save(new WorkCalendarDay(
+                UUID.randomUUID(), workplaceToday, DayType.WORKING,
+                LocalTime.of(0, 0), 15, LocalTime.of(23, 59), LocalTime.of(23, 59),
+                settings.getTimezoneId(), "Test workday", null, Instant.now()
+        )));
+
+        String face903 = Base64.getEncoder().encodeToString("MOCK_FACE_W903".getBytes(StandardCharsets.UTF_8));
+        mockMvc.perform(post("/api/v1/admin/workers/enroll")
+                        .cookie(adminCookie)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "workerCode", "W903",
+                                "fullName", "Geofence Test Worker",
+                                "teamName", "QA",
+                                "consentGiven", true,
+                                "imageBase64", face903
+                        ))))
+                .andExpect(status().isCreated());
+
+        // Enabling geofencing without coordinates is rejected
+        mockMvc.perform(put("/api/v1/admin/settings")
+                        .cookie(adminCookie)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.ofEntries(
+                                Map.entry("workplaceName", "MEC Team"),
+                                Map.entry("timezoneId", "Asia/Kolkata"),
+                                Map.entry("shiftStartLocal", "00:00"),
+                                Map.entry("gracePeriodMinutes", 15),
+                                Map.entry("absenceCutoffLocal", "23:59"),
+                                Map.entry("proxyEnabled", true),
+                                Map.entry("maxProxyPerActorPerDay", 1),
+                                Map.entry("geofenceEnabled", true),
+                                Map.entry("geofenceRadiusMeters", 50)
+                        ))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("GEOFENCE_COORDINATES_REQUIRED"));
+
+        // Radius smaller than 5 meters is rejected
+        mockMvc.perform(put("/api/v1/admin/settings")
+                        .cookie(adminCookie)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.ofEntries(
+                                Map.entry("workplaceName", "MEC Team"),
+                                Map.entry("timezoneId", "Asia/Kolkata"),
+                                Map.entry("shiftStartLocal", "00:00"),
+                                Map.entry("gracePeriodMinutes", 15),
+                                Map.entry("absenceCutoffLocal", "23:59"),
+                                Map.entry("proxyEnabled", true),
+                                Map.entry("maxProxyPerActorPerDay", 1),
+                                Map.entry("geofenceEnabled", true),
+                                Map.entry("geofenceLatitude", 19.076090),
+                                Map.entry("geofenceLongitude", 72.877426),
+                                Map.entry("geofenceRadiusMeters", 2)
+                        ))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_GEOFENCE_RADIUS"));
+
+        // Configure 50m office zone at (19.076090, 72.877426)
+        mockMvc.perform(put("/api/v1/admin/settings")
+                        .cookie(adminCookie)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.ofEntries(
+                                Map.entry("workplaceName", "MEC Team"),
+                                Map.entry("timezoneId", "Asia/Kolkata"),
+                                Map.entry("shiftStartLocal", "00:00"),
+                                Map.entry("gracePeriodMinutes", 15),
+                                Map.entry("absenceCutoffLocal", "23:59"),
+                                Map.entry("shiftEndLocal", "23:59"),
+                                Map.entry("proxyEnabled", true),
+                                Map.entry("maxProxyPerActorPerDay", 1),
+                                Map.entry("geofenceEnabled", true),
+                                Map.entry("geofenceLatitude", 19.076090),
+                                Map.entry("geofenceLongitude", 72.877426),
+                                Map.entry("geofenceRadiusMeters", 50)
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.geofenceEnabled").value(true))
+                .andExpect(jsonPath("$.geofenceRadiusMeters").value(50));
+
+        mockMvc.perform(get("/api/v1/attendance/kiosk/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.geofenceEnabled").value(true))
+                .andExpect(jsonPath("$.geofenceRadiusMeters").value(50));
+
+        // Missing location fails with LOCATION_REQUIRED
+        mockMvc.perform(post("/api/v1/attendance/kiosk/mark")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "imageBase64", face903,
+                                "actionType", "LOGIN",
+                                "idempotencyKey", UUID.randomUUID().toString()
+                        ))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("LOCATION_REQUIRED"));
+
+        // ~150m outside 50m radius fails both pre-check and kiosk/mark with OUT_OF_OFFICE_ZONE
+        mockMvc.perform(post("/api/v1/attendance/kiosk/location-check")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "latitude", 19.077440,
+                                "longitude", 72.877426
+                        ))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("OUT_OF_OFFICE_ZONE"));
+
+        mockMvc.perform(post("/api/v1/attendance/kiosk/mark")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "imageBase64", face903,
+                                "actionType", "LOGIN",
+                                "idempotencyKey", UUID.randomUUID().toString(),
+                                "latitude", 19.077440,
+                                "longitude", 72.877426
+                        ))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("OUT_OF_OFFICE_ZONE"))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("You are out of the office zone")));
+
+        // ~18m inside 50m radius passes location-check, LOGIN, and LOGOUT
+        mockMvc.perform(post("/api/v1/attendance/kiosk/location-check")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "latitude", 19.076250,
+                                "longitude", 72.877426
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed").value(true))
+                .andExpect(jsonPath("$.radiusMeters").value(50));
+
+        mockMvc.perform(post("/api/v1/attendance/kiosk/mark")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "imageBase64", face903,
+                                "actionType", "LOGIN",
+                                "idempotencyKey", UUID.randomUUID().toString(),
+                                "latitude", 19.076250,
+                                "longitude", 72.877426
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.subjectWorkerCode").value("W903"))
+                .andExpect(jsonPath("$.distanceMeters").isNumber());
+
+        // Logout while outside zone is also blocked
+        mockMvc.perform(post("/api/v1/attendance/kiosk/mark")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "imageBase64", face903,
+                                "actionType", "LOGOUT",
+                                "idempotencyKey", UUID.randomUUID().toString(),
+                                "latitude", 19.077440,
+                                "longitude", 72.877426
+                        ))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("OUT_OF_OFFICE_ZONE"));
+
+        // Expanding radius to 200m in Settings allows the ~150m coordinate
+        mockMvc.perform(put("/api/v1/admin/settings")
+                        .cookie(adminCookie)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.ofEntries(
+                                Map.entry("workplaceName", "MEC Team"),
+                                Map.entry("timezoneId", "Asia/Kolkata"),
+                                Map.entry("shiftStartLocal", "00:00"),
+                                Map.entry("gracePeriodMinutes", 15),
+                                Map.entry("absenceCutoffLocal", "23:59"),
+                                Map.entry("shiftEndLocal", "23:59"),
+                                Map.entry("proxyEnabled", true),
+                                Map.entry("maxProxyPerActorPerDay", 1),
+                                Map.entry("geofenceEnabled", true),
+                                Map.entry("geofenceLatitude", 19.076090),
+                                Map.entry("geofenceLongitude", 72.877426),
+                                Map.entry("geofenceRadiusMeters", 200)
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.geofenceRadiusMeters").value(200));
+
+        mockMvc.perform(post("/api/v1/attendance/kiosk/mark")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "imageBase64", face903,
+                                "actionType", "LOGOUT",
+                                "idempotencyKey", UUID.randomUUID().toString(),
+                                "latitude", 19.077440,
+                                "longitude", 72.877426
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.actionType").value("LOGOUT"))
+                .andExpect(jsonPath("$.subjectWorkerCode").value("W903"));
+    }
 }

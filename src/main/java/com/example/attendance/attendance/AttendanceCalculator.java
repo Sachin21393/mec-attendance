@@ -18,6 +18,7 @@ import java.util.Locale;
 public class AttendanceCalculator {
 
     private static final DateTimeFormatter LOCAL_TIME_DISPLAY = DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH);
+    private static final double EARTH_RADIUS_METERS = 6_371_000.0;
 
     public ZoneId resolveZone(AttendanceSettings settings) {
         return ZoneId.of(settings.getTimezoneId());
@@ -125,6 +126,20 @@ public class AttendanceCalculator {
 
     public String formatLocalTime(Instant utcInstant, ZoneId zone) {
         return utcInstant.atZone(zone).toLocalTime().format(LOCAL_TIME_DISPLAY);
+    }
+
+    /**
+     * Computes great-circle distance in meters between two WGS84 coordinates using Haversine.
+     */
+    public double haversineDistanceMeters(double lat1Deg, double lon1Deg, double lat2Deg, double lon2Deg) {
+        double dLat = Math.toRadians(lat2Deg - lat1Deg);
+        double dLon = Math.toRadians(lon2Deg - lon1Deg);
+        double lat1 = Math.toRadians(lat1Deg);
+        double lat2 = Math.toRadians(lat2Deg);
+        double a = Math.pow(Math.sin(dLat / 2.0), 2)
+                + Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin(dLon / 2.0), 2);
+        double c = 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
+        return EARTH_RADIUS_METERS * c;
     }
 
     public record EffectiveDayConfig(

@@ -395,6 +395,36 @@
                 <span>Allow workers to mark attendance for another present worker (Proxy attendance)</span>
               </label>
 
+              <div class="inline-form-card" style="margin: 0 0 16px;">
+                <h3 style="margin: 0 0 6px; font-size: 0.95rem;">Office Geofencing (Location Restriction)</h3>
+                <label class="checkbox-row" style="margin: 6px 0 12px;">
+                  <input id="set-geofence-enabled" type="checkbox">
+                  <span>Enforce office geofence (only allow attendance inside configured radius)</span>
+                </label>
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="set-geofence-latitude">Office latitude</label>
+                    <input id="set-geofence-latitude" class="input" type="number" step="any" min="-90" max="90" placeholder="e.g. 19.076090">
+                  </div>
+                  <div class="field">
+                    <label for="set-geofence-longitude">Office longitude</label>
+                    <input id="set-geofence-longitude" class="input" type="number" step="any" min="-180" max="180" placeholder="e.g. 72.877426">
+                  </div>
+                  <div class="field">
+                    <label for="set-geofence-radius">Allowed radius (meters)</label>
+                    <input id="set-geofence-radius" class="input" type="number" min="5" max="50000" value="50" required>
+                  </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px;">
+                  <button id="btn-use-current-location" type="button" class="btn btn-secondary" style="min-height: 36px; padding: 6px 12px;">
+                    Use My Current Location
+                  </button>
+                  <span id="geofence-loc-status" class="helper-text">
+                    Default radius is 50 meters. Enter exact office coordinates or tap Use My Current Location at the office.
+                  </span>
+                </div>
+              </div>
+
               <div id="tech-settings-box" class="inline-form-card">
                 <h3 style="margin: 0 0 6px; font-size: 0.95rem;">Technical Face Recognition Configuration (TECH_ADMIN only)</h3>
                 <p class="helper-text" style="margin-bottom: 12px;">

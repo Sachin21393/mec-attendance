@@ -95,7 +95,9 @@ public class AttendanceCheckInService {
                     null,
                     null,
                     worker.getFullName(),
-                    null
+                    null,
+                    settings.isGeofenceEnabled(),
+                    settings.getGeofenceRadiusMeters()
             );
         }
 
@@ -118,7 +120,9 @@ public class AttendanceCheckInService {
                 rec.getCheckInAtUtc(),
                 calculator.formatLocalTime(rec.getCheckInAtUtc(), dayConfig.timezone()),
                 worker.getFullName(),
-                actorName
+                actorName,
+                settings.isGeofenceEnabled(),
+                settings.getGeofenceRadiusMeters()
         );
     }
 
@@ -156,12 +160,32 @@ public class AttendanceCheckInService {
                 dayConfig.dayType(),
                 dayConfig.shiftStartLocal().toString(),
                 dayConfig.gracePeriodMinutes(),
-                dayConfig.shiftEndLocal() != null ? dayConfig.shiftEndLocal().toString() : dayConfig.absenceCutoffLocal().toString()
+                dayConfig.shiftEndLocal() != null ? dayConfig.shiftEndLocal().toString() : dayConfig.absenceCutoffLocal().toString(),
+                settings.isGeofenceEnabled(),
+                settings.getGeofenceRadiusMeters()
         );
+    }
+
+    @Transactional(readOnly = true)
+    public GeofenceCheckResult verifyWithinGeofence(Double latitude, Double longitude) {
+        AttendanceSettings settings = loadSettings();
+        return evaluateGeofence(settings, latitude, longitude, null);
     }
 
     @Transactional
     public CheckInResponse checkIn(UUID actorWorkerId, UUID sessionId, String rawVerificationToken, String idempotencyKey) {
+        return checkIn(actorWorkerId, sessionId, rawVerificationToken, idempotencyKey, null, null);
+    }
+
+    @Transactional
+    public CheckInResponse checkIn(
+            UUID actorWorkerId,
+            UUID sessionId,
+            String rawVerificationToken,
+            String idempotencyKey,
+            Double latitude,
+            Double longitude
+    ) {
         String cleanIdemKey = requireIdempotencyKey(idempotencyKey);
 
         Optional<AttendanceRecord> replayOpt = attendanceRepository.findByIdempotencyKey(cleanIdemKey);
@@ -180,7 +204,7 @@ public class AttendanceCheckInService {
         if (!bioToken.getActorWorkerId().equals(actorWorkerId)) {
             throw new ForbiddenException("VERIFICATION_ACTOR_MISMATCH", "Verification token does not belong to the signed-in worker.");
         }
-        return executeCheckIn(actorWorkerId, sessionId, bioToken, cleanIdemKey);
+        return executeCheckIn(actorWorkerId, sessionId, bioToken, cleanIdemKey, latitude, longitude);
     }
 
     @Transactional(readOnly = true)
@@ -210,6 +234,16 @@ public class AttendanceCheckInService {
      */
     @Transactional
     public CheckInResponse kioskCheckIn(String rawVerificationToken, String idempotencyKey) {
+        return kioskCheckIn(rawVerificationToken, idempotencyKey, null, null);
+    }
+
+    @Transactional
+    public CheckInResponse kioskCheckIn(
+            String rawVerificationToken,
+            String idempotencyKey,
+            Double latitude,
+            Double longitude
+    ) {
         String cleanIdemKey = requireIdempotencyKey(idempotencyKey);
 
         Optional<AttendanceRecord> replayOpt = attendanceRepository.findByIdempotencyKey(cleanIdemKey);
@@ -223,7 +257,7 @@ public class AttendanceCheckInService {
         if (!"KIOSK".equalsIgnoreCase(bioToken.getVerificationMode())) {
             throw new ForbiddenException("VERIFICATION_MODE_MISMATCH", "Invalid verification token mode for direct attendance.");
         }
-        return executeCheckIn(bioToken.getSubjectWorkerId(), null, bioToken, cleanIdemKey);
+        return executeCheckIn(bioToken.getSubjectWorkerId(), null, bioToken, cleanIdemKey, latitude, longitude);
     }
 
     /**
@@ -232,6 +266,16 @@ public class AttendanceCheckInService {
      */
     @Transactional
     public CheckInResponse kioskCheckOut(String rawVerificationToken, String idempotencyKey) {
+        return kioskCheckOut(rawVerificationToken, idempotencyKey, null, null);
+    }
+
+    @Transactional
+    public CheckInResponse kioskCheckOut(
+            String rawVerificationToken,
+            String idempotencyKey,
+            Double latitude,
+            Double longitude
+    ) {
         String cleanIdemKey = requireIdempotencyKey(idempotencyKey);
 
         Optional<AttendanceRecord> replayOpt = attendanceRepository.findByLogoutIdempotencyKey(cleanIdemKey);
@@ -254,6 +298,7 @@ public class AttendanceCheckInService {
         }
 
         AttendanceSettings settings = loadSettings();
+        GeofenceCheckResult geofence = evaluateGeofence(settings, latitude, longitude, subject.getId());
         LocalDate attendanceDate = calculator.resolveAttendanceDate(now, settings);
         WorkCalendarDay calDay = calendarRepository.findByCalendarDate(attendanceDate).orElse(null);
         AttendanceCalculator.EffectiveDayConfig dayConfig = calculator.resolveDayConfig(attendanceDate, calDay, settings);
@@ -288,21 +333,25 @@ public class AttendanceCheckInService {
         record.setLogoutStatus(logoutStatus);
         record.setLogoutIdempotencyKey(cleanIdemKey);
         record.setLogoutMatchConfidence(bioToken.getMatchConfidence());
+        record.setCheckOutLocation(latitude, longitude, geofence.distanceMeters());
         record.setUpdatedAt(now);
         attendanceRepository.saveAndFlush(record);
 
+        Map<String, Object> logoutMeta = new java.util.LinkedHashMap<>();
+        logoutMeta.put("attendanceDate", attendanceDate.toString());
+        logoutMeta.put("logoutStatus", logoutStatus.name());
+        logoutMeta.put("logoutLabel", logoutStatus.getDisplayLabel());
+        logoutMeta.put("workerCode", subject.getWorkerCode());
+        logoutMeta.put("shiftEndLocal", dayConfig.shiftEndLocal().toString());
+        if (geofence.distanceMeters() != null) {
+            logoutMeta.put("distanceMeters", Math.round(geofence.distanceMeters()));
+        }
         auditService.record(
                 "ATTENDANCE_LOGOUT_RECORDED",
                 AuditActorType.WORKER,
                 subject.getId(),
                 subject.getId(),
-                Map.of(
-                        "attendanceDate", attendanceDate.toString(),
-                        "logoutStatus", logoutStatus.name(),
-                        "logoutLabel", logoutStatus.getDisplayLabel(),
-                        "workerCode", subject.getWorkerCode(),
-                        "shiftEndLocal", dayConfig.shiftEndLocal().toString()
-                )
+                logoutMeta
         );
 
         String checkInLocal = calculator.formatLocalTime(record.getCheckInAtUtc(), dayConfig.timezone());
@@ -326,7 +375,8 @@ public class AttendanceCheckInService {
                 checkOutLocal,
                 logoutStatus,
                 logoutStatus.getDisplayLabel(),
-                dayConfig.shiftEndLocal().toString()
+                dayConfig.shiftEndLocal().toString(),
+                geofence.distanceMeters()
         );
     }
 
@@ -367,7 +417,8 @@ public class AttendanceCheckInService {
                 existing.getCheckOutAtUtc() != null ? calculator.formatLocalTime(existing.getCheckOutAtUtc(), zone) : null,
                 existing.getLogoutStatus(),
                 existing.getLogoutStatus() != null ? existing.getLogoutStatus().getDisplayLabel() : null,
-                dayConfig.shiftEndLocal().toString()
+                dayConfig.shiftEndLocal().toString(),
+                actionType == AttendanceActionType.LOGOUT ? existing.getCheckOutDistanceMeters() : existing.getCheckInDistanceMeters()
         );
     }
 
@@ -393,7 +444,9 @@ public class AttendanceCheckInService {
             UUID actorWorkerId,
             UUID sessionId,
             BiometricVerificationToken bioToken,
-            String cleanIdemKey
+            String cleanIdemKey,
+            Double latitude,
+            Double longitude
     ) {
         Instant now = clock.instant();
 
@@ -408,6 +461,7 @@ public class AttendanceCheckInService {
                 : AttendanceMethod.SELF;
 
         AttendanceSettings settings = loadSettings();
+        GeofenceCheckResult geofence = evaluateGeofence(settings, latitude, longitude, bioToken.getSubjectWorkerId());
         LocalDate attendanceDate = calculator.resolveAttendanceDate(now, settings);
         WorkCalendarDay calDay = calendarRepository.findByCalendarDate(attendanceDate).orElse(null);
         AttendanceCalculator.EffectiveDayConfig dayConfig = calculator.resolveDayConfig(attendanceDate, calDay, settings);
@@ -492,6 +546,7 @@ public class AttendanceCheckInService {
                 note,
                 now
         );
+        record.setCheckInLocation(latitude, longitude, geofence.distanceMeters());
 
         try {
             attendanceRepository.saveAndFlush(record);
@@ -499,19 +554,22 @@ public class AttendanceCheckInService {
             throw new ConflictException("ALREADY_MARKED", "Attendance has already been marked for today.");
         }
 
+        Map<String, Object> loginMeta = new java.util.LinkedHashMap<>();
+        loginMeta.put("attendanceDate", attendanceDate.toString());
+        loginMeta.put("status", status.name());
+        loginMeta.put("method", method.name());
+        loginMeta.put("actorWorkerCode", actor.getWorkerCode());
+        loginMeta.put("subjectWorkerCode", subject.getWorkerCode());
+        loginMeta.put("mockMode", bioToken.isMockMode());
+        if (geofence.distanceMeters() != null) {
+            loginMeta.put("distanceMeters", Math.round(geofence.distanceMeters()));
+        }
         auditService.record(
                 method == AttendanceMethod.PROXY ? "ATTENDANCE_PROXY_RECORDED" : "ATTENDANCE_SELF_RECORDED",
                 AuditActorType.WORKER,
                 actor.getId(),
                 subject.getId(),
-                Map.of(
-                        "attendanceDate", attendanceDate.toString(),
-                        "status", status.name(),
-                        "method", method.name(),
-                        "actorWorkerCode", actor.getWorkerCode(),
-                        "subjectWorkerCode", subject.getWorkerCode(),
-                        "mockMode", bioToken.isMockMode()
-                )
+                loginMeta
         );
 
         return new CheckInResponse(
@@ -533,7 +591,77 @@ public class AttendanceCheckInService {
                 null,
                 null,
                 null,
-                dayConfig.shiftEndLocal().toString()
+                dayConfig.shiftEndLocal().toString(),
+                geofence.distanceMeters()
+        );
+    }
+
+    private GeofenceCheckResult evaluateGeofence(
+            AttendanceSettings settings,
+            Double latitude,
+            Double longitude,
+            UUID subjectWorkerId
+    ) {
+        if (!settings.isGeofenceEnabled()) {
+            Double dist = null;
+            if (latitude != null && longitude != null
+                    && Double.isFinite(latitude) && Double.isFinite(longitude)
+                    && settings.getGeofenceLatitude() != null && settings.getGeofenceLongitude() != null) {
+                dist = calculator.haversineDistanceMeters(
+                        settings.getGeofenceLatitude(), settings.getGeofenceLongitude(), latitude, longitude);
+            }
+            return new GeofenceCheckResult(true, false, dist, settings.getGeofenceRadiusMeters(), null);
+        }
+
+        if (settings.getGeofenceLatitude() == null || settings.getGeofenceLongitude() == null) {
+            throw new ForbiddenException(
+                    "GEOFENCE_NOT_CONFIGURED",
+                    "Office geofence coordinates are not configured. Please contact your administrator."
+            );
+        }
+        if (latitude == null || longitude == null || !Double.isFinite(latitude) || !Double.isFinite(longitude)) {
+            throw new ForbiddenException(
+                    "LOCATION_REQUIRED",
+                    "Location access is required to verify you are inside the office zone. Please enable GPS/location and try again."
+            );
+        }
+        if (latitude < -90.0 || latitude > 90.0 || longitude < -180.0 || longitude > 180.0) {
+            throw new ValidationException("INVALID_LOCATION", "Submitted GPS coordinates are invalid.");
+        }
+
+        double distance = calculator.haversineDistanceMeters(
+                settings.getGeofenceLatitude(),
+                settings.getGeofenceLongitude(),
+                latitude,
+                longitude
+        );
+        int radius = settings.getGeofenceRadiusMeters();
+        if (distance > radius) {
+            long roundedDistance = Math.round(distance);
+            auditService.recordIndependent(
+                    "ATTENDANCE_GEOFENCE_REJECTED",
+                    AuditActorType.WORKER,
+                    subjectWorkerId,
+                    subjectWorkerId,
+                    Map.of(
+                            "distanceMeters", roundedDistance,
+                            "allowedRadiusMeters", radius,
+                            "workerLatitude", latitude,
+                            "workerLongitude", longitude
+                    )
+            );
+            throw new ForbiddenException(
+                    "OUT_OF_OFFICE_ZONE",
+                    "You are out of the office zone (" + roundedDistance + "m away; allowed radius is " + radius + "m)."
+            );
+        }
+
+        return new GeofenceCheckResult(
+                true,
+                true,
+                distance,
+                radius,
+                "Within office zone (" + Math.round(distance) + "m of " + radius + "m limit)."
         );
     }
 
@@ -558,7 +686,9 @@ public class AttendanceCheckInService {
             Instant checkInAtUtc,
             String checkInLocalTime,
             String workerName,
-            String markedByName
+            String markedByName,
+            boolean geofenceEnabled,
+            int geofenceRadiusMeters
     ) {
     }
 
@@ -591,7 +721,8 @@ public class AttendanceCheckInService {
             String checkOutLocalTime,
             LogoutStatus logoutStatus,
             String logoutStatusLabel,
-            String shiftEndLocal
+            String shiftEndLocal,
+            Double distanceMeters
     ) {
     }
 
@@ -602,7 +733,18 @@ public class AttendanceCheckInService {
             DayType dayType,
             String shiftStartLocal,
             int gracePeriodMinutes,
-            String shiftEndLocal
+            String shiftEndLocal,
+            boolean geofenceEnabled,
+            int geofenceRadiusMeters
+    ) {
+    }
+
+    public record GeofenceCheckResult(
+            boolean allowed,
+            boolean geofenceEnabled,
+            Double distanceMeters,
+            int radiusMeters,
+            String message
     ) {
     }
 }

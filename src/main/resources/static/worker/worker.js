@@ -14,6 +14,8 @@ const views = {
 
 const state = {
   biometricsConfig: null,
+  kioskStatus: null,
+  lastLocation: null,
   worker: null,
   today: null,
   cameraMode: 'kiosk', // 'kiosk' | 'register'
@@ -335,8 +337,104 @@ function formatShiftAndGrace(shiftStartLocal, graceMinutes) {
     : `${startLabel} (No grace)`;
 }
 
+function prewarmGeolocationIfGranted() {
+  if (!state.kioskStatus?.geofenceEnabled || !navigator.geolocation || !navigator.permissions?.query) {
+    return;
+  }
+  navigator.permissions.query({ name: 'geolocation' }).then((perm) => {
+    if (perm.state === 'granted') {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          state.lastLocation = {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            capturedAtMs: Date.now()
+          };
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 6000, maximumAge: 10000 }
+      );
+    }
+  }).catch(() => {});
+}
+
+function getCurrentGpsPosition(maxAgeMs = 8000) {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('Location/GPS is unavailable in this browser.'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const loc = {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          capturedAtMs: Date.now()
+        };
+        state.lastLocation = loc;
+        resolve(loc);
+      },
+      (err) => {
+        if (err.code === 1) {
+          reject(new Error('Location permission is required to check the office zone. Please enable Location access in browser settings and try again.'));
+        } else {
+          reject(new Error('Could not read GPS location. Please enable GPS/Location on your device and try again.'));
+        }
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: maxAgeMs }
+    );
+  });
+}
+
+async function verifyGeofenceAndStartScan(action) {
+  if (!navigator.onLine) {
+    showAttendanceFailure("You're offline. Your attendance has not been recorded.", true);
+    return;
+  }
+  setBanner('kiosk-geofence-error', '');
+  if (!state.kioskStatus) {
+    state.kioskStatus = await apiFetch('/api/v1/attendance/kiosk/status').catch(() => null);
+  }
+  if (!state.kioskStatus?.geofenceEnabled) {
+    openCameraView('kiosk', action);
+    return;
+  }
+
+  const loginBtn = document.getElementById('btn-kiosk-login');
+  const logoutBtn = document.getElementById('btn-kiosk-logout');
+  const activeBtn = action === 'LOGOUT' ? logoutBtn : loginBtn;
+  const origLabel = activeBtn.textContent;
+  loginBtn.disabled = true;
+  logoutBtn.disabled = true;
+  activeBtn.textContent = 'Checking office location...';
+
+  try {
+    const loc = await getCurrentGpsPosition(8000);
+    await apiFetch('/api/v1/attendance/kiosk/location-check', {
+      method: 'POST',
+      body: { latitude: loc.latitude, longitude: loc.longitude }
+    });
+    openCameraView('kiosk', action);
+  } catch (err) {
+    const msg = err?.message || 'You are out of the office zone.';
+    setBanner('kiosk-geofence-error', msg);
+    if (!views.welcome.hidden) {
+      document.getElementById('kiosk-geofence-error')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else {
+      showAttendanceFailure(msg, true, false);
+    }
+  } finally {
+    loginBtn.disabled = false;
+    logoutBtn.disabled = false;
+    activeBtn.textContent = origLabel;
+  }
+}
+
 async function showKioskHome(registeredMsg = '') {
   stopCamera();
+  setBanner('kiosk-geofence-error', '');
   const regBanner = document.getElementById('kiosk-reg-banner');
   if (kioskRegTimer) {
     clearTimeout(kioskRegTimer);
@@ -357,9 +455,20 @@ async function showKioskHome(registeredMsg = '') {
   }
   try {
     const k = await apiFetch('/api/v1/attendance/kiosk/status');
+    state.kioskStatus = k;
     document.getElementById('kiosk-workplace-meta').textContent =
       `${k.workplaceName} (${k.timezoneId}) — Choose Login or Logout Attendance below.`;
     document.getElementById('kiosk-date').textContent = k.attendanceDate || '-';
+    const geoRow = document.getElementById('kiosk-geofence-row');
+    const geoInfo = document.getElementById('kiosk-geofence-info');
+    if (geoRow && geoInfo) {
+      if (k.geofenceEnabled) {
+        geoRow.hidden = false;
+        geoInfo.textContent = `${k.geofenceRadiusMeters || 50}m radius enforced`;
+      } else {
+        geoRow.hidden = true;
+      }
+    }
     const loginBtn = document.getElementById('btn-kiosk-login');
     const logoutBtn = document.getElementById('btn-kiosk-logout');
     if (k.dayType && k.dayType !== 'WORKING') {
@@ -379,6 +488,7 @@ async function showKioskHome(registeredMsg = '') {
       logoutBtn.disabled = false;
       logoutBtn.textContent = 'Logout Attendance';
     }
+    prewarmGeolocationIfGranted();
   } catch {
     // Non-fatal fallback
   }
@@ -533,7 +643,9 @@ async function handleCameraCapture(imageBase64, opts = {}) {
         body: {
           imageBase64,
           idempotencyKey: state.pendingIdempotencyKey,
-          actionType: state.attendanceAction
+          actionType: state.attendanceAction,
+          latitude: state.lastLocation?.latitude ?? null,
+          longitude: state.lastLocation?.longitude ?? null
         }
       });
       stopAutoScan();
@@ -547,6 +659,11 @@ async function handleCameraCapture(imageBase64, opts = {}) {
       stopAutoScan();
       setScanning(false);
       showAttendanceFailure(err.message, false, true);
+    } else if (err instanceof ApiError && (err.code === 'OUT_OF_OFFICE_ZONE' || err.code === 'LOCATION_REQUIRED' || err.code === 'GEOFENCE_NOT_CONFIGURED')) {
+      stopAutoScan();
+      setScanning(false);
+      state.lastLocation = null;
+      showAttendanceFailure(err.message, true, false);
     } else if (fromAuto && err instanceof ApiError
       && (err.code === 'NO_FACE_DETECTED' || err.code === 'MULTIPLE_FACES_DETECTED'
         || err.code === 'FACE_TOO_BLURRY' || err.code === 'FACE_TOO_SMALL'
@@ -677,19 +794,11 @@ async function init() {
 }
 
 document.getElementById('btn-kiosk-login')?.addEventListener('click', () => {
-  if (!navigator.onLine) {
-    showAttendanceFailure("You're offline. Your attendance has not been recorded.", true);
-    return;
-  }
-  openCameraView('kiosk', 'LOGIN');
+  verifyGeofenceAndStartScan('LOGIN');
 });
 
 document.getElementById('btn-kiosk-logout')?.addEventListener('click', () => {
-  if (!navigator.onLine) {
-    showAttendanceFailure("You're offline. Your attendance has not been recorded.", true);
-    return;
-  }
-  openCameraView('kiosk', 'LOGOUT');
+  verifyGeofenceAndStartScan('LOGOUT');
 });
 
 document.getElementById('btn-start-register').addEventListener('click', () => {
@@ -799,8 +908,14 @@ document.getElementById('btn-capture-action').addEventListener('click', async ()
 document.getElementById('btn-proxy-confirm-submit').addEventListener('click', submitProxyConfirmation);
 document.getElementById('btn-proxy-confirm-cancel').addEventListener('click', () => showKioskHome());
 
-document.getElementById('btn-result-next-worker')?.addEventListener('click', () => openCameraView('kiosk', state.attendanceAction));
-document.getElementById('btn-result-retry').addEventListener('click', () => openCameraView(state.cameraMode, state.attendanceAction));
+document.getElementById('btn-result-next-worker')?.addEventListener('click', () => verifyGeofenceAndStartScan(state.attendanceAction));
+document.getElementById('btn-result-retry').addEventListener('click', () => {
+  if (state.cameraMode === 'kiosk') {
+    verifyGeofenceAndStartScan(state.attendanceAction);
+  } else {
+    openCameraView(state.cameraMode, state.attendanceAction);
+  }
+});
 document.getElementById('btn-result-done').addEventListener('click', () => showKioskHome());
 
 document.getElementById('btn-switch-worker').addEventListener('click', async () => {

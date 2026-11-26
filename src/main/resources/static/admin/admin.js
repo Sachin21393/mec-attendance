@@ -713,6 +713,17 @@ async function loadCalendarAndSettings() {
     document.getElementById('set-proxy-cap').value = s.maxProxyPerActorPerDay;
     document.getElementById('set-proxy-enabled').checked = !!s.proxyEnabled;
 
+    document.getElementById('set-geofence-enabled').checked = !!s.geofenceEnabled;
+    document.getElementById('set-geofence-latitude').value = s.geofenceLatitude != null ? s.geofenceLatitude : '';
+    document.getElementById('set-geofence-longitude').value = s.geofenceLongitude != null ? s.geofenceLongitude : '';
+    document.getElementById('set-geofence-radius').value = s.geofenceRadiusMeters != null ? s.geofenceRadiusMeters : 50;
+    const locStatus = document.getElementById('geofence-loc-status');
+    if (locStatus) {
+      locStatus.textContent = s.geofenceLatitude != null && s.geofenceLongitude != null
+        ? `Office zone center: ${Number(s.geofenceLatitude).toFixed(6)}, ${Number(s.geofenceLongitude).toFixed(6)} (${s.geofenceRadiusMeters || 50}m radius).`
+        : 'Default radius is 50 meters. Enter exact office coordinates or tap Use My Current Location at the office.';
+    }
+
     const threshInput = document.getElementById('set-face-threshold');
     const modelInput = document.getElementById('set-face-model-version');
     threshInput.value = s.faceMatchThreshold;
@@ -912,11 +923,67 @@ document.getElementById('btn-cal-copy-prev').addEventListener('click', async () 
   }
 });
 
+document.getElementById('set-geofence-latitude')?.addEventListener('paste', (e) => {
+  const text = (e.clipboardData || window.clipboardData)?.getData('text') || '';
+  const match = text.trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+  if (match) {
+    e.preventDefault();
+    document.getElementById('set-geofence-latitude').value = match[1];
+    document.getElementById('set-geofence-longitude').value = match[2];
+  }
+});
+
+document.getElementById('btn-use-current-location')?.addEventListener('click', () => {
+  const statusEl = document.getElementById('geofence-loc-status');
+  const btn = document.getElementById('btn-use-current-location');
+  if (!navigator.geolocation) {
+    if (statusEl) statusEl.textContent = 'Geolocation is not supported in this browser.';
+    return;
+  }
+  btn.disabled = true;
+  if (statusEl) statusEl.textContent = 'Fetching current GPS coordinates...';
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      btn.disabled = false;
+      const lat = Number(pos.coords.latitude.toFixed(6));
+      const lng = Number(pos.coords.longitude.toFixed(6));
+      document.getElementById('set-geofence-latitude').value = lat;
+      document.getElementById('set-geofence-longitude').value = lng;
+      if (statusEl) {
+        statusEl.textContent = `Captured: ${lat}, ${lng} (±${Math.round(pos.coords.accuracy)}m GPS accuracy). Click Save Settings to apply.`;
+      }
+    },
+    (err) => {
+      btn.disabled = false;
+      if (statusEl) {
+        statusEl.textContent = err.code === 1
+          ? 'Location permission denied. Allow location access in your browser or enter coordinates manually.'
+          : 'Could not read GPS location. Ensure GPS/location is enabled or enter coordinates manually.';
+      }
+    },
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+  );
+});
+
 document.getElementById('form-settings').addEventListener('submit', async (e) => {
   e.preventDefault();
   setGlobalError('');
   const threshInput = document.getElementById('set-face-threshold');
   const modelInput = document.getElementById('set-face-model-version');
+  const geofenceEnabled = document.getElementById('set-geofence-enabled').checked;
+  const latRaw = document.getElementById('set-geofence-latitude').value.trim();
+  const lngRaw = document.getElementById('set-geofence-longitude').value.trim();
+  const radiusRaw = document.getElementById('set-geofence-radius').value.trim();
+
+  const geofenceLatitude = latRaw !== '' ? Number(latRaw) : null;
+  const geofenceLongitude = lngRaw !== '' ? Number(lngRaw) : null;
+  const geofenceRadiusMeters = radiusRaw !== '' ? Number(radiusRaw) : 50;
+
+  if (geofenceEnabled && (geofenceLatitude === null || geofenceLongitude === null || Number.isNaN(geofenceLatitude) || Number.isNaN(geofenceLongitude))) {
+    setGlobalError('Please enter both Office latitude and Office longitude before enabling geofencing.');
+    return;
+  }
+
   const body = {
     workplaceName: document.getElementById('set-workplace-name').value.trim(),
     timezoneId: document.getElementById('set-timezone').value.trim(),
@@ -926,15 +993,23 @@ document.getElementById('form-settings').addEventListener('submit', async (e) =>
     shiftEndLocal: document.getElementById('set-shift-end').value,
     proxyEnabled: document.getElementById('set-proxy-enabled').checked,
     maxProxyPerActorPerDay: Number(document.getElementById('set-proxy-cap').value),
-    proxyCapCountsSuccessfulOnly: true
+    proxyCapCountsSuccessfulOnly: true,
+    geofenceEnabled,
+    geofenceLatitude,
+    geofenceLongitude,
+    geofenceRadiusMeters
   };
   if (!threshInput.disabled) {
     body.faceMatchThreshold = Number(threshInput.value);
     body.faceModelVersion = modelInput.value.trim();
   }
   try {
-    await apiFetch('/api/v1/admin/settings', { method: 'PUT', body });
+    const saved = await apiFetch('/api/v1/admin/settings', { method: 'PUT', body });
     state.shiftStartLocal = body.shiftStartLocal;
+    const locStatus = document.getElementById('geofence-loc-status');
+    if (locStatus && saved.geofenceLatitude != null && saved.geofenceLongitude != null) {
+      locStatus.textContent = `Office zone center: ${Number(saved.geofenceLatitude).toFixed(6)}, ${Number(saved.geofenceLongitude).toFixed(6)} (${saved.geofenceRadiusMeters || 50}m radius).`;
+    }
     showSettingsFeedback('Workplace and attendance settings saved.');
     await loadDashboardAndGrid();
   } catch (err) {

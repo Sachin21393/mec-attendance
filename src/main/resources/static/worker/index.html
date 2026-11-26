@@ -48,6 +48,7 @@
       <!-- First Launch / Direct Kiosk Attendance -->
       <section id="view-welcome" class="card" hidden>
         <div id="kiosk-reg-banner" class="banner banner-success" hidden></div>
+        <div id="kiosk-geofence-error" class="banner banner-error" hidden></div>
         <h2 class="section-heading">Mark Your Attendance</h2>
         <p id="kiosk-workplace-meta" class="helper-text" style="margin-bottom: 14px;">
           Registered workers can scan their face directly to record attendance.
@@ -65,6 +66,10 @@
           <div class="status-summary-row">
             <span class="helper-text">Logout time</span>
             <strong id="kiosk-logout-info">-</strong>
+          </div>
+          <div id="kiosk-geofence-row" class="status-summary-row" hidden>
+            <span class="helper-text">Office zone</span>
+            <strong id="kiosk-geofence-info">-</strong>
           </div>
         </div>
 

@@ -57,6 +57,24 @@ public class AttendanceRecord {
     @Column(name = "logout_match_confidence")
     private Double logoutMatchConfidence;
 
+    @Column(name = "check_in_latitude")
+    private Double checkInLatitude;
+
+    @Column(name = "check_in_longitude")
+    private Double checkInLongitude;
+
+    @Column(name = "check_in_distance_meters")
+    private Double checkInDistanceMeters;
+
+    @Column(name = "check_out_latitude")
+    private Double checkOutLatitude;
+
+    @Column(name = "check_out_longitude")
+    private Double checkOutLongitude;
+
+    @Column(name = "check_out_distance_meters")
+    private Double checkOutDistanceMeters;
+
     @Column(name = "device_session_id")
     private UUID deviceSessionId;
 
@@ -168,6 +186,42 @@ public class AttendanceRecord {
 
     public void setLogoutMatchConfidence(Double logoutMatchConfidence) {
         this.logoutMatchConfidence = logoutMatchConfidence;
+    }
+
+    public Double getCheckInLatitude() {
+        return checkInLatitude;
+    }
+
+    public void setCheckInLocation(Double latitude, Double longitude, Double distanceMeters) {
+        this.checkInLatitude = latitude;
+        this.checkInLongitude = longitude;
+        this.checkInDistanceMeters = distanceMeters;
+    }
+
+    public Double getCheckInLongitude() {
+        return checkInLongitude;
+    }
+
+    public Double getCheckInDistanceMeters() {
+        return checkInDistanceMeters;
+    }
+
+    public Double getCheckOutLatitude() {
+        return checkOutLatitude;
+    }
+
+    public void setCheckOutLocation(Double latitude, Double longitude, Double distanceMeters) {
+        this.checkOutLatitude = latitude;
+        this.checkOutLongitude = longitude;
+        this.checkOutDistanceMeters = distanceMeters;
+    }
+
+    public Double getCheckOutLongitude() {
+        return checkOutLongitude;
+    }
+
+    public Double getCheckOutDistanceMeters() {
+        return checkOutDistanceMeters;
     }
 
     public UUID getDeviceSessionId() {

@@ -67,6 +67,22 @@ public class AdminSettingsService {
         if (req.maxProxyPerActorPerDay() < 0 || req.maxProxyPerActorPerDay() > 100) {
             throw new ValidationException("INVALID_PROXY_CAP", "Proxy limit must be between 0 and 100.");
         }
+        if (req.geofenceRadiusMeters() != null && (req.geofenceRadiusMeters() < 5 || req.geofenceRadiusMeters() > 50_000)) {
+            throw new ValidationException("INVALID_GEOFENCE_RADIUS", "Geofence radius must be between 5 and 50000 meters.");
+        }
+        if (req.geofenceLatitude() != null && (!Double.isFinite(req.geofenceLatitude()) || req.geofenceLatitude() < -90.0 || req.geofenceLatitude() > 90.0)) {
+            throw new ValidationException("INVALID_GEOFENCE_COORDINATES", "Office latitude must be between -90 and 90.");
+        }
+        if (req.geofenceLongitude() != null && (!Double.isFinite(req.geofenceLongitude()) || req.geofenceLongitude() < -180.0 || req.geofenceLongitude() > 180.0)) {
+            throw new ValidationException("INVALID_GEOFENCE_COORDINATES", "Office longitude must be between -180 and 180.");
+        }
+
+        boolean nextGeofenceEnabled = req.geofenceEnabled() != null ? req.geofenceEnabled() : s.isGeofenceEnabled();
+        Double nextLat = req.geofenceLatitude() != null ? req.geofenceLatitude() : s.getGeofenceLatitude();
+        Double nextLng = req.geofenceLongitude() != null ? req.geofenceLongitude() : s.getGeofenceLongitude();
+        if (nextGeofenceEnabled && (nextLat == null || nextLng == null)) {
+            throw new ValidationException("GEOFENCE_COORDINATES_REQUIRED", "Office latitude and longitude are required when geofencing is enabled.");
+        }
 
         boolean techChangeRequested = (req.faceMatchThreshold() != null && Math.abs(req.faceMatchThreshold() - s.getFaceMatchThreshold()) > 1e-6)
                 || (req.faceModelVersion() != null && !req.faceModelVersion().isBlank() && !req.faceModelVersion().trim().equals(s.getFaceModelVersion()));
@@ -74,14 +90,15 @@ public class AdminSettingsService {
             throw new ForbiddenException("TECH_ADMIN_REQUIRED", "Only technical administrators can modify face recognition thresholds or model versions.");
         }
 
-        Map<String, Object> before = Map.of(
-                "timezoneId", s.getTimezoneId(),
-                "shiftStart", s.getDefaultShiftStartLocal().toString(),
-                "graceMinutes", s.getDefaultGracePeriodMinutes(),
-                "absenceCutoff", s.getDefaultAbsenceCutoffLocal().toString(),
-                "proxyEnabled", s.isProxyEnabled(),
-                "maxProxy", s.getMaxProxyPerActorPerDay()
-        );
+        Map<String, Object> before = new LinkedHashMap<>();
+        before.put("timezoneId", s.getTimezoneId());
+        before.put("shiftStart", s.getDefaultShiftStartLocal().toString());
+        before.put("graceMinutes", s.getDefaultGracePeriodMinutes());
+        before.put("absenceCutoff", s.getDefaultAbsenceCutoffLocal().toString());
+        before.put("proxyEnabled", s.isProxyEnabled());
+        before.put("maxProxy", s.getMaxProxyPerActorPerDay());
+        before.put("geofenceEnabled", s.isGeofenceEnabled());
+        before.put("geofenceRadiusMeters", s.getGeofenceRadiusMeters());
 
         Instant now = Instant.now();
         s.setWorkplaceName(req.workplaceName().trim());
@@ -106,6 +123,18 @@ public class AdminSettingsService {
         if (req.faceModelVersion() != null && !req.faceModelVersion().isBlank()) {
             s.setFaceModelVersion(req.faceModelVersion().trim());
         }
+        if (req.geofenceEnabled() != null) {
+            s.setGeofenceEnabled(req.geofenceEnabled());
+        }
+        if (req.geofenceLatitude() != null) {
+            s.setGeofenceLatitude(req.geofenceLatitude());
+        }
+        if (req.geofenceLongitude() != null) {
+            s.setGeofenceLongitude(req.geofenceLongitude());
+        }
+        if (req.geofenceRadiusMeters() != null) {
+            s.setGeofenceRadiusMeters(req.geofenceRadiusMeters());
+        }
         s.setEffectiveFromUtc(req.effectiveFromUtc() != null ? req.effectiveFromUtc() : now);
         s.setUpdatedByAdminId(admin != null ? admin.adminUserId() : null);
         s.setUpdatedAt(now);
@@ -126,17 +155,19 @@ public class AdminSettingsService {
             calendarRepository.saveAll(upcomingDays);
         }
 
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("timezoneId", s.getTimezoneId());
+        after.put("shiftStart", s.getDefaultShiftStartLocal().toString());
+        after.put("graceMinutes", s.getDefaultGracePeriodMinutes());
+        after.put("absenceCutoff", s.getDefaultAbsenceCutoffLocal().toString());
+        after.put("proxyEnabled", s.isProxyEnabled());
+        after.put("maxProxy", s.getMaxProxyPerActorPerDay());
+        after.put("geofenceEnabled", s.isGeofenceEnabled());
+        after.put("geofenceRadiusMeters", s.getGeofenceRadiusMeters());
+        after.put("effectiveFromUtc", s.getEffectiveFromUtc().toString());
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("before", before);
-        metadata.put("after", Map.of(
-                "timezoneId", s.getTimezoneId(),
-                "shiftStart", s.getDefaultShiftStartLocal().toString(),
-                "graceMinutes", s.getDefaultGracePeriodMinutes(),
-                "absenceCutoff", s.getDefaultAbsenceCutoffLocal().toString(),
-                "proxyEnabled", s.isProxyEnabled(),
-                "maxProxy", s.getMaxProxyPerActorPerDay(),
-                "effectiveFromUtc", s.getEffectiveFromUtc().toString()
-        ));
+        metadata.put("after", after);
         auditService.record("SETTINGS_UPDATED", AuditActorType.ADMIN, admin != null ? admin.adminUserId() : null, null, metadata);
 
         return SettingsDto.from(s, admin != null && admin.role() == AdminRole.TECH_ADMIN);
@@ -314,6 +345,10 @@ public class AdminSettingsService {
             double faceMatchThreshold,
             String faceModelVersion,
             boolean canEditBiometricConfig,
+            boolean geofenceEnabled,
+            Double geofenceLatitude,
+            Double geofenceLongitude,
+            int geofenceRadiusMeters,
             Instant effectiveFromUtc,
             Instant updatedAt
     ) {
@@ -332,6 +367,10 @@ public class AdminSettingsService {
                     s.getFaceMatchThreshold(),
                     s.getFaceModelVersion(),
                     canEditTech,
+                    s.isGeofenceEnabled(),
+                    s.getGeofenceLatitude(),
+                    s.getGeofenceLongitude(),
+                    s.getGeofenceRadiusMeters(),
                     s.getEffectiveFromUtc(),
                     s.getUpdatedAt()
             );
@@ -350,7 +389,11 @@ public class AdminSettingsService {
             Boolean proxyCapCountsSuccessfulOnly,
             Double faceMatchThreshold,
             String faceModelVersion,
-            Instant effectiveFromUtc
+            Instant effectiveFromUtc,
+            Boolean geofenceEnabled,
+            Double geofenceLatitude,
+            Double geofenceLongitude,
+            Integer geofenceRadiusMeters
     ) {
     }
 

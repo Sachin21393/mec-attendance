@@ -87,13 +87,27 @@ public class AttendanceController {
                 principal.workerId(),
                 principal.sessionId(),
                 request.verificationToken(),
-                effectiveIdemKey
+                effectiveIdemKey,
+                request.latitude(),
+                request.longitude()
         );
     }
 
     @GetMapping("/kiosk/status")
     public AttendanceCheckInService.KioskStatusResponse kioskStatus() {
         return checkInService.getKioskStatus();
+    }
+
+    @PostMapping("/kiosk/location-check")
+    public AttendanceCheckInService.GeofenceCheckResult kioskLocationCheck(
+            @RequestBody(required = false) LocationCheckRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        String key = "kiosk-loc:" + (httpRequest.getRemoteAddr() != null ? httpRequest.getRemoteAddr() : "unknown");
+        rateLimiterService.checkLimit(key, 150, Duration.ofMinutes(5));
+        Double lat = request != null ? request.latitude() : null;
+        Double lng = request != null ? request.longitude() : null;
+        return checkInService.verifyWithinGeofence(lat, lng);
     }
 
     @PostMapping("/kiosk/verify")
@@ -103,6 +117,7 @@ public class AttendanceController {
     ) {
         String key = "kiosk-verify:" + (httpRequest.getRemoteAddr() != null ? httpRequest.getRemoteAddr() : "unknown");
         rateLimiterService.checkLimit(key, 150, Duration.ofMinutes(5));
+        checkInService.verifyWithinGeofence(request.latitude(), request.longitude());
         return verificationService.verifyKiosk(request.workerCode(), request.imageBase64());
     }
 
@@ -117,7 +132,12 @@ public class AttendanceController {
         String effectiveIdemKey = (request.idempotencyKey() != null && !request.idempotencyKey().isBlank())
                 ? request.idempotencyKey()
                 : headerIdempotencyKey;
-        return checkInService.kioskCheckIn(request.verificationToken(), effectiveIdemKey);
+        return checkInService.kioskCheckIn(
+                request.verificationToken(),
+                effectiveIdemKey,
+                request.latitude(),
+                request.longitude()
+        );
     }
 
     /**
@@ -142,22 +162,33 @@ public class AttendanceController {
         if (replay.isPresent()) {
             return replay.get();
         }
+        checkInService.verifyWithinGeofence(request.latitude(), request.longitude());
         BiometricsVerificationService.KioskVerificationOutcome verified =
                 verificationService.verifyKiosk(request.workerCode(), request.imageBase64());
         return action == AttendanceActionType.LOGOUT
-                ? checkInService.kioskCheckOut(verified.verificationToken(), effectiveIdemKey)
-                : checkInService.kioskCheckIn(verified.verificationToken(), effectiveIdemKey);
+                ? checkInService.kioskCheckOut(verified.verificationToken(), effectiveIdemKey, request.latitude(), request.longitude())
+                : checkInService.kioskCheckIn(verified.verificationToken(), effectiveIdemKey, request.latitude(), request.longitude());
+    }
+
+    public record LocationCheckRequest(
+            Double latitude,
+            Double longitude
+    ) {
     }
 
     public record CheckInRequest(
             @NotBlank(message = "Verification token is required") String verificationToken,
-            String idempotencyKey
+            String idempotencyKey,
+            Double latitude,
+            Double longitude
     ) {
     }
 
     public record KioskVerifyRequest(
             @Size(max = 40) String workerCode,
-            @NotBlank(message = "Image is required") String imageBase64
+            @NotBlank(message = "Image is required") String imageBase64,
+            Double latitude,
+            Double longitude
     ) {
     }
 
@@ -165,7 +196,9 @@ public class AttendanceController {
             @Size(max = 40) String workerCode,
             @NotBlank(message = "Image is required") String imageBase64,
             String idempotencyKey,
-            AttendanceActionType actionType
+            AttendanceActionType actionType,
+            Double latitude,
+            Double longitude
     ) {
     }
 }

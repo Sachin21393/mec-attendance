@@ -89,6 +89,7 @@ public class SecurityConfig {
                                 "/api/v1/worker-invitations/validate",
                                 "/api/v1/workers/register",
                                 "/api/v1/workers/logout",
+                                "/api/v1/attendance/kiosk/location-check",
                                 "/api/v1/attendance/kiosk/verify",
                                 "/api/v1/attendance/kiosk/check-in",
                                 "/api/v1/attendance/kiosk/mark"
