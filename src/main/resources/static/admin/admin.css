@@ -606,3 +606,34 @@
   max-width: 460px;
   box-shadow: 0 20px 40px rgba(15, 23, 42, 0.22);
 }
+
+.enroll-photo-step {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.enroll-uploaded-thumb {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.enroll-uploaded-thumb img {
+  width: 96px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+
+.enroll-thumb-caption {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--status-ontime-fg);
+}

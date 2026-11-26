@@ -1,4 +1,4 @@
-const CACHE_NAME = 'workforce-attendance-shell-v4';
+const CACHE_NAME = 'workforce-attendance-shell-v5';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

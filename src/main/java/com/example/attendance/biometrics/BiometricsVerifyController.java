@@ -37,7 +37,7 @@ public class BiometricsVerifyController {
         if (principal == null) {
             throw new UnauthorizedException("UNAUTHORIZED", "Worker session is required.");
         }
-        rateLimiterService.checkLimit("bio-verify:" + principal.workerId(), 25, Duration.ofMinutes(5));
+        rateLimiterService.checkLimit("bio-verify:" + principal.workerId(), 60, Duration.ofMinutes(5));
         return verificationService.verify(
                 principal.workerId(),
                 request.mode(),

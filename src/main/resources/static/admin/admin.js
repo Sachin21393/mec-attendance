@@ -781,6 +781,10 @@ document.getElementById('btn-close-drawer').addEventListener('click', () => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    const camModal = document.getElementById('enroll-camera-modal');
+    if (camModal && !camModal.hidden) {
+      closeEnrollCameraModal();
+    }
     const modal = document.getElementById('delete-worker-modal');
     if (modal && !modal.hidden) {
       closeDeleteModal();
@@ -948,8 +952,7 @@ document.getElementById('reports-search').addEventListener('input', () => {
 const enrollState = {
   stream: null,
   imageBase64: null,
-  batchCount: 0,
-  directory: []
+  batchCount: 0
 };
 
 function setEnrollError(msg) {
@@ -964,32 +967,34 @@ function setEnrollError(msg) {
   }
 }
 
+function setEnrollCamModalError(msg) {
+  const el = document.getElementById('enroll-cam-error');
+  if (!el) return;
+  if (!msg) {
+    el.hidden = true;
+    el.textContent = '';
+  } else {
+    el.textContent = msg;
+    el.hidden = false;
+  }
+}
+
 function updateEnrollPreviewUi() {
-  const video = document.getElementById('enroll-video');
+  const wrap = document.getElementById('enroll-preview-wrap');
   const img = document.getElementById('enroll-preview-img');
-  const placeholder = document.getElementById('enroll-photo-placeholder');
-  const snapBtn = document.getElementById('btn-enroll-snap');
+  const startCamBtn = document.getElementById('btn-enroll-start-cam');
   const clearBtn = document.getElementById('btn-enroll-clear-photo');
 
   if (enrollState.imageBase64) {
     img.src = `data:image/jpeg;base64,${enrollState.imageBase64}`;
-    img.hidden = false;
-    video.hidden = true;
-    placeholder.hidden = true;
-    snapBtn.hidden = true;
+    wrap.hidden = false;
     clearBtn.hidden = false;
-  } else if (enrollState.stream) {
-    img.hidden = true;
-    video.hidden = false;
-    placeholder.hidden = true;
-    snapBtn.hidden = false;
-    clearBtn.hidden = true;
+    startCamBtn.textContent = 'Retake Picture';
   } else {
-    img.hidden = true;
-    video.hidden = true;
-    placeholder.hidden = false;
-    snapBtn.hidden = true;
+    img.removeAttribute('src');
+    wrap.hidden = true;
     clearBtn.hidden = true;
+    startCamBtn.textContent = 'Start Camera';
   }
 }
 
@@ -1002,15 +1007,26 @@ function stopEnrollCamera() {
   if (video) {
     video.srcObject = null;
   }
-  updateEnrollPreviewUi();
 }
 
-async function startEnrollCamera() {
-  setEnrollError('');
-  enrollState.imageBase64 = null;
+function closeEnrollCameraModal() {
   stopEnrollCamera();
+  const modal = document.getElementById('enroll-camera-modal');
+  if (modal) {
+    modal.hidden = true;
+  }
+}
+
+async function openEnrollCameraModal() {
+  setEnrollError('');
+  setEnrollCamModalError('');
+  stopEnrollCamera();
+
+  const modal = document.getElementById('enroll-camera-modal');
+  modal.hidden = false;
+
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    setEnrollError('Live webcam is unavailable here. Use "Upload / Phone Photo" instead.');
+    setEnrollCamModalError('Live webcam is unavailable here. Close this dialog and use "Upload Photo" instead.');
     return;
   }
   try {
@@ -1027,9 +1043,8 @@ async function startEnrollCamera() {
     const video = document.getElementById('enroll-video');
     video.srcObject = stream;
     await video.play().catch(() => {});
-    updateEnrollPreviewUi();
   } catch {
-    setEnrollError('Camera permission denied or unavailable. You can still use "Upload / Phone Photo".');
+    setEnrollCamModalError('Camera permission denied or unavailable. You can still use "Upload Photo".');
   }
 }
 
@@ -1059,69 +1074,33 @@ function compressFileToJpegBase64(file) {
   });
 }
 
-async function refreshEnrollExistingSelect() {
-  try {
-    const page = await apiFetch('/api/v1/admin/workers?size=100');
-    enrollState.directory = page.content.filter((w) => !w.biometricsEnrolled && w.status !== 'DISABLED');
-    const sel = document.getElementById('enroll-existing-worker');
-    const currentVal = sel.value;
-    sel.innerHTML = '<option value="">Create new worker (enter details below)</option>';
-    enrollState.directory.forEach((w) => {
-      const opt = document.createElement('option');
-      opt.value = w.id;
-      opt.textContent = `${w.workerCode} — ${w.fullName}${w.teamName ? ' (' + w.teamName + ')' : ''} [${w.status}]`;
-      if (w.id === currentVal) opt.selected = true;
-      sel.appendChild(opt);
-    });
-  } catch {
-    // Non-fatal
-  }
-}
-
-document.getElementById('btn-toggle-enroll-form').addEventListener('click', async () => {
+document.getElementById('btn-toggle-enroll-form').addEventListener('click', () => {
   const form = document.getElementById('form-enroll-worker');
   const inviteForm = document.getElementById('form-create-worker');
   inviteForm.hidden = true;
   form.hidden = !form.hidden;
   if (!form.hidden) {
     setEnrollError('');
-    await refreshEnrollExistingSelect();
     updateEnrollPreviewUi();
+    document.getElementById('enroll-worker-code').focus();
   } else {
-    stopEnrollCamera();
+    closeEnrollCameraModal();
   }
 });
 
 document.getElementById('btn-enroll-close').addEventListener('click', () => {
-  stopEnrollCamera();
+  closeEnrollCameraModal();
   document.getElementById('form-enroll-worker').hidden = true;
 });
 
-document.getElementById('enroll-existing-worker').addEventListener('change', (e) => {
-  const selectedId = e.target.value;
-  const codeInput = document.getElementById('enroll-worker-code');
-  const nameInput = document.getElementById('enroll-worker-name');
-  const teamInput = document.getElementById('enroll-worker-team');
-  const found = enrollState.directory.find((w) => w.id === selectedId);
-  if (found) {
-    codeInput.value = found.workerCode;
-    codeInput.disabled = true;
-    nameInput.value = found.fullName;
-    teamInput.value = found.teamName || '';
-  } else {
-    codeInput.disabled = false;
-    codeInput.value = '';
-    nameInput.value = '';
-    teamInput.value = '';
-  }
-});
-
-document.getElementById('btn-enroll-start-cam').addEventListener('click', startEnrollCamera);
+document.getElementById('btn-enroll-start-cam').addEventListener('click', openEnrollCameraModal);
+document.getElementById('btn-enroll-cam-close').addEventListener('click', closeEnrollCameraModal);
+document.getElementById('btn-enroll-cam-cancel').addEventListener('click', closeEnrollCameraModal);
 
 document.getElementById('btn-enroll-snap').addEventListener('click', () => {
   const video = document.getElementById('enroll-video');
   if (!video.videoWidth || !video.videoHeight) {
-    setEnrollError('Camera frame is not ready yet.');
+    setEnrollCamModalError('Camera frame is not ready yet. Please wait a moment and try again.');
     return;
   }
   const canvas = document.getElementById('enroll-canvas');
@@ -1129,6 +1108,7 @@ document.getElementById('btn-enroll-snap').addEventListener('click', () => {
   canvas.height = video.videoHeight;
   canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
   enrollState.imageBase64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+  closeEnrollCameraModal();
   setEnrollError('');
   updateEnrollPreviewUi();
 });
@@ -1159,14 +1139,13 @@ document.getElementById('form-enroll-worker').addEventListener('submit', async (
   e.preventDefault();
   setEnrollError('');
 
-  const selectedId = document.getElementById('enroll-existing-worker').value || null;
   const workerCode = document.getElementById('enroll-worker-code').value.trim();
   const fullName = document.getElementById('enroll-worker-name').value.trim();
   const teamName = document.getElementById('enroll-worker-team').value.trim() || null;
   const consentGiven = document.getElementById('enroll-consent-checkbox').checked;
 
-  if (!selectedId && !workerCode) {
-    setEnrollError('Please enter a worker code (e.g. W011).');
+  if (!workerCode) {
+    setEnrollError('Please enter a worker code (e.g. W001).');
     return;
   }
   if (!fullName) {
@@ -1178,7 +1157,7 @@ document.getElementById('form-enroll-worker').addEventListener('submit', async (
     return;
   }
   if (!enrollState.imageBase64) {
-    setEnrollError('Please capture or upload a face photo first.');
+    setEnrollError('Please click Start Camera to capture a photo or upload one first.');
     return;
   }
 
@@ -1190,8 +1169,7 @@ document.getElementById('form-enroll-worker').addEventListener('submit', async (
     const enrolled = await apiFetch('/api/v1/admin/workers/enroll', {
       method: 'POST',
       body: {
-        workerId: selectedId,
-        workerCode: selectedId ? null : workerCode,
+        workerCode,
         fullName,
         teamName,
         consentGiven: true,
@@ -1205,10 +1183,7 @@ document.getElementById('form-enroll-worker').addEventListener('submit', async (
     showTimedBanner('invite-created-banner',
       `Worker ${enrolled.fullName} (${enrolled.workerCode}) registered with face template.`, 3000);
 
-    // Reset form for next worker while keeping live camera open if already running
-    document.getElementById('enroll-existing-worker').value = '';
     const codeInput = document.getElementById('enroll-worker-code');
-    codeInput.disabled = false;
     codeInput.value = '';
     document.getElementById('enroll-worker-name').value = '';
     document.getElementById('enroll-worker-team').value = '';
@@ -1216,7 +1191,7 @@ document.getElementById('form-enroll-worker').addEventListener('submit', async (
     enrollState.imageBase64 = null;
     updateEnrollPreviewUi();
 
-    await Promise.all([loadWorkersTable(), refreshEnrollExistingSelect()]);
+    await loadWorkersTable();
     codeInput.focus();
   } catch (err) {
     setEnrollError(err.message || 'Could not enroll worker photo.');
@@ -1357,7 +1332,7 @@ document.getElementById('form-delete-workers').addEventListener('submit', async 
     closeDeleteModal();
     showTimedBanner('invite-created-banner',
       `Deleted ${result.deletedCount} worker(s): ${result.deletedWorkerCodes.join(', ')}.`, 3000);
-    await Promise.all([loadWorkersTable(), refreshEnrollExistingSelect(), loadDashboardAndGrid()]);
+    await Promise.all([loadWorkersTable(), loadDashboardAndGrid()]);
   } catch (err) {
     errEl.textContent = err.message || 'Could not delete worker(s).';
     errEl.hidden = false;

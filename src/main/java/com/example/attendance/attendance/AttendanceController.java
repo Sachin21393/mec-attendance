@@ -102,7 +102,7 @@ public class AttendanceController {
             HttpServletRequest httpRequest
     ) {
         String key = "kiosk-verify:" + (httpRequest.getRemoteAddr() != null ? httpRequest.getRemoteAddr() : "unknown");
-        rateLimiterService.checkLimit(key, 30, Duration.ofMinutes(5));
+        rateLimiterService.checkLimit(key, 150, Duration.ofMinutes(5));
         return verificationService.verifyKiosk(request.workerCode(), request.imageBase64());
     }
 
@@ -113,7 +113,7 @@ public class AttendanceController {
             HttpServletRequest httpRequest
     ) {
         String key = "kiosk-checkin:" + (httpRequest.getRemoteAddr() != null ? httpRequest.getRemoteAddr() : "unknown");
-        rateLimiterService.checkLimit(key, 30, Duration.ofMinutes(5));
+        rateLimiterService.checkLimit(key, 150, Duration.ofMinutes(5));
         String effectiveIdemKey = (request.idempotencyKey() != null && !request.idempotencyKey().isBlank())
                 ? request.idempotencyKey()
                 : headerIdempotencyKey;

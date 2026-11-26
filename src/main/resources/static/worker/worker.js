@@ -21,6 +21,10 @@ const state = {
   consentVersion: '',
   fullName: '',
   stream: null,
+  autoScanTimer: null,
+  autoScanActive: false,
+  autoScanAttempts: 0,
+  faceDetector: null,
   busy: false,
   pendingIdempotencyKey: null,
   pendingProxyVerify: null
@@ -47,13 +51,119 @@ function setScanning(active) {
   document.getElementById('camera-frame-wrap').classList.toggle('scanning', active);
 }
 
+function stopAutoScan() {
+  state.autoScanActive = false;
+  if (state.autoScanTimer) {
+    clearTimeout(state.autoScanTimer);
+    state.autoScanTimer = null;
+  }
+}
+
 function stopCamera() {
+  stopAutoScan();
   setScanning(false);
   if (state.stream) {
     state.stream.getTracks().forEach((t) => t.stop());
     state.stream = null;
   }
   document.getElementById('camera-video').srcObject = null;
+}
+
+function hasUsableFrameBrightness() {
+  const video = document.getElementById('camera-video');
+  if (!state.stream || video.videoWidth === 0 || video.videoHeight === 0) {
+    return false;
+  }
+  const sampleCanvas = document.getElementById('camera-canvas');
+  sampleCanvas.width = 64;
+  sampleCanvas.height = 48;
+  const ctx = sampleCanvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, 64, 48);
+  const data = ctx.getImageData(0, 0, 64, 48).data;
+  let sum = 0;
+  let min = 255;
+  let max = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
+    sum += lum;
+    if (lum < min) min = lum;
+    if (lum > max) max = lum;
+  }
+  const avg = sum / (data.length / 4);
+  return avg > 18 && (max - min) > 20;
+}
+
+async function runAutoScanTick() {
+  if (!state.autoScanActive || !state.stream || (state.cameraMode !== 'kiosk' && state.cameraMode !== 'self')) {
+    return;
+  }
+  const video = document.getElementById('camera-video');
+  if (!state.busy && video.videoWidth > 0 && video.readyState >= 2) {
+    if (state.autoScanAttempts >= 25) {
+      stopAutoScan();
+      setScanning(false);
+      document.getElementById('camera-guidance').textContent =
+        'No clear face detected automatically. Place your face in frame and tap Scan Now.';
+      return;
+    }
+
+    let shouldCapture = false;
+    let waitMs = 1100;
+
+    if ('FaceDetector' in window) {
+      waitMs = 350;
+      try {
+        if (!state.faceDetector) {
+          state.faceDetector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 2 });
+        }
+        const faces = await state.faceDetector.detect(video);
+        if (faces.length === 1 && faces[0].boundingBox.width >= video.videoWidth * 0.12) {
+          shouldCapture = true;
+        } else if (faces.length > 1) {
+          document.getElementById('camera-guidance').textContent = 'Multiple faces detected — keep only one person in frame.';
+        } else {
+          document.getElementById('camera-guidance').textContent = 'Looking for your face... Place face inside the oval.';
+        }
+      } catch {
+        // Browser exposes FaceDetector constructor without working backend; disable and use frame polling
+        state.faceDetector = null;
+        if (hasUsableFrameBrightness()) {
+          shouldCapture = true;
+        }
+        waitMs = 1100;
+      }
+    } else if (hasUsableFrameBrightness()) {
+      shouldCapture = true;
+    }
+
+    if (shouldCapture) {
+      const img = captureCanvasBase64();
+      if (img) {
+        state.autoScanAttempts += 1;
+        await handleCameraCapture(img, { auto: true });
+      }
+    }
+
+    if (state.autoScanActive) {
+      state.autoScanTimer = setTimeout(runAutoScanTick, waitMs);
+    }
+    return;
+  }
+
+  if (state.autoScanActive) {
+    state.autoScanTimer = setTimeout(runAutoScanTick, 400);
+  }
+}
+
+function startAutoScan() {
+  stopAutoScan();
+  if (state.cameraMode !== 'kiosk' && state.cameraMode !== 'self') {
+    return;
+  }
+  state.autoScanActive = true;
+  state.autoScanAttempts = 0;
+  setScanning(true);
+  state.autoScanTimer = setTimeout(runAutoScanTick, 750);
 }
 
 async function startCamera() {
@@ -82,6 +192,11 @@ async function startCamera() {
     const video = document.getElementById('camera-video');
     video.srcObject = stream;
     await video.play().catch(() => {});
+    if (state.cameraMode === 'kiosk' || state.cameraMode === 'self') {
+      document.getElementById('camera-guidance').textContent =
+        'Look straight into the oval — scanning your face automatically...';
+      startAutoScan();
+    }
   } catch (err) {
     placeholder.hidden = false;
     if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
@@ -225,14 +340,17 @@ function openCameraView(mode) {
     heading.textContent = 'Take your registration photo';
     guidance.textContent = 'Place your face inside the frame in good lighting. Keep only one face in frame.';
     actionBtn.textContent = 'Capture & Complete Registration';
+    actionBtn.className = 'btn btn-primary btn-block';
   } else if (mode === 'proxy') {
     heading.textContent = 'Ask the worker to face the camera';
     guidance.textContent = 'The other worker must be physically present for face verification.';
     actionBtn.textContent = 'Verify Worker Face';
+    actionBtn.className = 'btn btn-primary btn-block';
   } else {
     heading.textContent = 'Place your face inside the frame';
-    guidance.textContent = 'Keep your face still for a moment in good lighting.';
-    actionBtn.textContent = 'Verify & Mark Attendance';
+    guidance.textContent = 'Look straight into the oval — scanning automatically...';
+    actionBtn.textContent = 'Scan Now';
+    actionBtn.className = 'btn btn-secondary btn-block';
   }
 
   showView('camera');
@@ -277,11 +395,13 @@ function showAttendanceFailure(message, allowRetry = true) {
   showView('result');
 }
 
-async function handleCameraCapture(imageBase64) {
+async function handleCameraCapture(imageBase64, opts = {}) {
+  const fromAuto = !!opts.auto;
   if (state.busy) {
     return;
   }
   if (!navigator.onLine) {
+    stopAutoScan();
     if (state.cameraMode !== 'register') {
       showAttendanceFailure("You're offline. Your attendance has not been recorded.", true);
     } else {
@@ -293,7 +413,9 @@ async function handleCameraCapture(imageBase64) {
   state.busy = true;
   const actionBtn = document.getElementById('btn-capture-action');
   actionBtn.disabled = true;
-  setBanner('camera-error', '');
+  if (!fromAuto) {
+    setBanner('camera-error', '');
+  }
   setScanning(true);
 
   try {
@@ -343,6 +465,7 @@ async function handleCameraCapture(imageBase64) {
           idempotencyKey: state.pendingIdempotencyKey
         }
       });
+      stopAutoScan();
       showAttendanceSuccess(checkIn);
     } else {
       document.getElementById('camera-guidance').textContent = 'Verifying your face...';
@@ -358,15 +481,28 @@ async function handleCameraCapture(imageBase64) {
           idempotencyKey: state.pendingIdempotencyKey
         }
       });
+      stopAutoScan();
       showAttendanceSuccess(checkIn);
     }
   } catch (err) {
-    setScanning(false);
     if (state.cameraMode === 'register') {
+      setScanning(false);
       setBanner('camera-error', err.message || 'Registration failed. Please try again.');
     } else if (err instanceof ApiError && err.code === 'ALREADY_MARKED') {
+      stopAutoScan();
+      setScanning(false);
       showAttendanceFailure(err.message, false);
+    } else if (fromAuto && err instanceof ApiError
+      && (err.code === 'NO_FACE_DETECTED' || err.code === 'MULTIPLE_FACES_DETECTED' || err.code === 'FACE_TOO_BLURRY' || err.code === 'FACE_TOO_SMALL')) {
+      document.getElementById('camera-guidance').textContent =
+        err.message || 'Hold still with a single face inside the oval...';
+    } else if (err instanceof ApiError && err.code === 'FACE_NOT_RECOGNIZED') {
+      stopAutoScan();
+      setScanning(false);
+      showAttendanceFailure(err.message || 'Face did not match any registered worker. Please try again in better lighting.', true);
     } else {
+      stopAutoScan();
+      setScanning(false);
       setBanner('camera-error', err.message || "We couldn't verify your face. Please try again in better lighting.");
       document.getElementById('camera-guidance').textContent = 'Place face inside the frame and try again.';
     }
@@ -583,12 +719,13 @@ document.getElementById('btn-camera-cancel').addEventListener('click', () => {
 });
 
 document.getElementById('btn-capture-action').addEventListener('click', async () => {
+  stopAutoScan();
   const img = captureCanvasBase64();
   if (!img) {
     setBanner('camera-error', 'No live camera frame available. Allow camera access and tap Retry Camera.');
     return;
   }
-  await handleCameraCapture(img);
+  await handleCameraCapture(img, { auto: false });
 });
 
 document.getElementById('btn-proxy-confirm-submit').addEventListener('click', submitProxyConfirmation);

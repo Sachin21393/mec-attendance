@@ -12,16 +12,17 @@ RUN ./mvnw -B clean package -DskipTests
 FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
 
-RUN groupadd --system app && useradd --system --gid app app
-COPY --from=build /workspace/target/workforce-attendance-*.jar /app/app.jar
-COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
-
-RUN mkdir -p /app/models \
+RUN groupadd --system app && useradd --system --gid app app \
+    && mkdir -p /app/models \
     && curl -fsSL -o /app/models/face_detection_yunet_2023mar.onnx \
        "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx" \
     && curl -fsSL -o /app/models/face_recognition_sface_2021dec.onnx \
-       "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx" \
-    && sed -i 's/\r$//' /app/docker-entrypoint.sh \
+       "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
+
+COPY --from=build /workspace/target/workforce-attendance-*.jar /app/app.jar
+COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
+
+RUN sed -i 's/\r$//' /app/docker-entrypoint.sh \
     && chmod +x /app/docker-entrypoint.sh \
     && chown -R app:app /app
 
