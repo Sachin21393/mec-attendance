@@ -88,8 +88,10 @@ public class SecurityConfig {
                                 "/api/v1/admin/auth/login",
                                 "/api/v1/worker-invitations/validate",
                                 "/api/v1/workers/register",
+                                "/api/v1/workers/logout",
                                 "/api/v1/attendance/kiosk/verify",
-                                "/api/v1/attendance/kiosk/check-in"
+                                "/api/v1/attendance/kiosk/check-in",
+                                "/api/v1/attendance/kiosk/mark"
                         ).permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/workers/**", "/api/v1/biometrics/**", "/api/v1/attendance/**").hasRole("WORKER")

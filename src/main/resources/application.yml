@@ -20,6 +20,9 @@ spring:
 server:
   port: ${PORT:${SERVER_PORT:8080}}
   forward-headers-strategy: framework
+  compression:
+    enabled: true
+    min-response-size: 1024
 
 management:
   endpoints:
@@ -41,7 +44,7 @@ attendance:
     provider: ${ATTENDANCE_BIOMETRICS_PROVIDER:mock}
     production-enabled: ${ATTENDANCE_PRODUCTION_BIOMETRICS_ENABLED:false}
     embedding-dimension: ${ATTENDANCE_BIOMETRICS_EMBEDDING_DIM:128}
-    match-threshold: ${ATTENDANCE_BIOMETRICS_MATCH_THRESHOLD:0.363}
+    match-threshold: ${ATTENDANCE_BIOMETRICS_MATCH_THRESHOLD:0.42}
     max-image-bytes: ${ATTENDANCE_BIOMETRICS_MAX_IMAGE_BYTES:5242880}
     encryption-key-b64: ${BIOMETRICS_ENCRYPTION_KEY_B64:}
     key-version: ${BIOMETRICS_KEY_VERSION:v1}

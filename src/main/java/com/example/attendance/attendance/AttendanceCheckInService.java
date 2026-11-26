@@ -182,6 +182,18 @@ public class AttendanceCheckInService {
         return executeCheckIn(actorWorkerId, sessionId, bioToken, cleanIdemKey);
     }
 
+    @Transactional(readOnly = true)
+    public Optional<CheckInResponse> findIdempotentReplay(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return Optional.empty();
+        }
+        return attendanceRepository.findByIdempotencyKey(idempotencyKey.trim())
+                .map(existing -> {
+                    UUID actorId = existing.getActorWorkerId() != null ? existing.getActorWorkerId() : existing.getSubjectWorkerId();
+                    return buildReplayResponse(existing, actorId);
+                });
+    }
+
     /**
      * Completes a direct kiosk attendance check-in using a single-use KIOSK verification token
      * without requiring a prior personal worker session cookie on the device.
@@ -326,8 +338,8 @@ public class AttendanceCheckInService {
         Optional<AttendanceRecord> alreadyMarked = attendanceRepository.findBySubjectWorkerIdAndAttendanceDate(subject.getId(), attendanceDate);
         if (alreadyMarked.isPresent()) {
             String timeStr = calculator.formatLocalTime(alreadyMarked.get().getCheckInAtUtc(), dayConfig.timezone());
-            String msg = method == AttendanceMethod.PROXY
-                    ? subject.getFullName() + " has already marked attendance today at " + timeStr
+            String msg = (method == AttendanceMethod.PROXY || sessionId == null)
+                    ? subject.getFullName() + " (" + subject.getWorkerCode() + ") has already marked attendance today at " + timeStr
                     : "You have already marked attendance today at " + timeStr;
             throw new ConflictException("ALREADY_MARKED", msg);
         }

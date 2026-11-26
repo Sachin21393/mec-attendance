@@ -16,7 +16,7 @@ const state = {
   biometricsConfig: null,
   worker: null,
   today: null,
-  cameraMode: 'register', // 'register' | 'self' | 'proxy'
+  cameraMode: 'kiosk', // 'kiosk' | 'register'
   invitationCode: '',
   consentVersion: '',
   fullName: '',
@@ -24,11 +24,14 @@ const state = {
   autoScanTimer: null,
   autoScanActive: false,
   autoScanAttempts: 0,
+  autoRecognitionMisses: 0,
   faceDetector: null,
   busy: false,
   pendingIdempotencyKey: null,
   pendingProxyVerify: null
 };
+
+let kioskRegTimer = null;
 
 function showView(name) {
   Object.entries(views).forEach(([key, el]) => {
@@ -94,12 +97,12 @@ function hasUsableFrameBrightness() {
 }
 
 async function runAutoScanTick() {
-  if (!state.autoScanActive || !state.stream || (state.cameraMode !== 'kiosk' && state.cameraMode !== 'self')) {
+  if (!state.autoScanActive || !state.stream || state.cameraMode !== 'kiosk') {
     return;
   }
   const video = document.getElementById('camera-video');
   if (!state.busy && video.videoWidth > 0 && video.readyState >= 2) {
-    if (state.autoScanAttempts >= 25) {
+    if (state.autoScanAttempts >= 20) {
       stopAutoScan();
       setScanning(false);
       document.getElementById('camera-guidance').textContent =
@@ -108,16 +111,16 @@ async function runAutoScanTick() {
     }
 
     let shouldCapture = false;
-    let waitMs = 1100;
+    let waitMs = 950;
 
     if ('FaceDetector' in window) {
-      waitMs = 350;
+      waitMs = 450;
       try {
         if (!state.faceDetector) {
           state.faceDetector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 2 });
         }
         const faces = await state.faceDetector.detect(video);
-        if (faces.length === 1 && faces[0].boundingBox.width >= video.videoWidth * 0.12) {
+        if (faces.length === 1 && faces[0].boundingBox.width >= video.videoWidth * 0.14) {
           shouldCapture = true;
         } else if (faces.length > 1) {
           document.getElementById('camera-guidance').textContent = 'Multiple faces detected — keep only one person in frame.';
@@ -130,7 +133,7 @@ async function runAutoScanTick() {
         if (hasUsableFrameBrightness()) {
           shouldCapture = true;
         }
-        waitMs = 1100;
+        waitMs = 950;
       }
     } else if (hasUsableFrameBrightness()) {
       shouldCapture = true;
@@ -157,13 +160,15 @@ async function runAutoScanTick() {
 
 function startAutoScan() {
   stopAutoScan();
-  if (state.cameraMode !== 'kiosk' && state.cameraMode !== 'self') {
+  if (state.cameraMode !== 'kiosk') {
     return;
   }
   state.autoScanActive = true;
   state.autoScanAttempts = 0;
+  state.autoRecognitionMisses = 0;
   setScanning(true);
-  state.autoScanTimer = setTimeout(runAutoScanTick, 750);
+  // Give mobile camera autofocus & auto-exposure 850ms to stabilize before capturing frame #1
+  state.autoScanTimer = setTimeout(runAutoScanTick, 850);
 }
 
 async function startCamera() {
@@ -212,12 +217,16 @@ function captureCanvasBase64() {
   if (!state.stream || video.videoWidth === 0) {
     return null;
   }
+  const maxSide = 640;
+  const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
+  const targetW = Math.max(160, Math.round(video.videoWidth * scale));
+  const targetH = Math.max(160, Math.round(video.videoHeight * scale));
   const canvas = document.getElementById('camera-canvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+  canvas.width = targetW;
+  canvas.height = targetH;
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.85);
+  ctx.drawImage(video, 0, 0, targetW, targetH);
+  return canvas.toDataURL('image/jpeg', 0.82);
 }
 
 function setupVoiceInput() {
@@ -303,19 +312,60 @@ async function refreshHome(justRegistered = false) {
   showView('home');
 }
 
-async function showKioskHome() {
+function formatTime12h(hhMm) {
+  const parts = String(hhMm || '').slice(0, 5).split(':');
+  if (parts.length !== 2) return String(hhMm || '-');
+  const h24 = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (Number.isNaN(h24) || Number.isNaN(m)) return String(hhMm || '-');
+  const period = h24 >= 12 ? 'PM' : 'AM';
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${String(h12).padStart(2, '0')}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+function formatShiftAndGrace(shiftStartLocal, graceMinutes) {
+  const startLabel = formatTime12h(shiftStartLocal);
+  const parts = String(shiftStartLocal || '').slice(0, 5).split(':');
+  if (parts.length !== 2) return `${startLabel} (${graceMinutes}m grace)`;
+  const totalMins = (Number(parts[0]) * 60 + Number(parts[1]) + Number(graceMinutes || 0)) % (24 * 60);
+  const endHhMm = `${String(Math.floor(totalMins / 60)).padStart(2, '0')}:${String(totalMins % 60).padStart(2, '0')}`;
+  return Number(graceMinutes || 0) > 0
+    ? `${startLabel} (Grace until ${formatTime12h(endHhMm)})`
+    : `${startLabel} (No grace)`;
+}
+
+async function showKioskHome(registeredMsg = '') {
   stopCamera();
+  const regBanner = document.getElementById('kiosk-reg-banner');
+  if (kioskRegTimer) {
+    clearTimeout(kioskRegTimer);
+    kioskRegTimer = null;
+  }
+  if (regBanner) {
+    if (registeredMsg) {
+      regBanner.textContent = registeredMsg;
+      regBanner.hidden = false;
+      kioskRegTimer = setTimeout(() => {
+        regBanner.hidden = true;
+        regBanner.textContent = '';
+      }, 4500);
+    } else {
+      regBanner.hidden = true;
+      regBanner.textContent = '';
+    }
+  }
   try {
     const k = await apiFetch('/api/v1/attendance/kiosk/status');
     document.getElementById('kiosk-workplace-meta').textContent =
-      `${k.workplaceName} (${k.timezoneId}) — Registered workers can mark attendance directly below.`;
+      `${k.workplaceName} (${k.timezoneId}) — Any registered worker can scan their face below.`;
     document.getElementById('kiosk-date').textContent = k.attendanceDate || '-';
     if (k.dayType && k.dayType !== 'WORKING') {
       document.getElementById('kiosk-shift-info').textContent = k.dayType === 'HOLIDAY' ? 'Holiday' : 'Weekly off';
       document.getElementById('btn-kiosk-mark-attendance').disabled = true;
       document.getElementById('btn-kiosk-mark-attendance').textContent = 'Non-working day';
     } else {
-      document.getElementById('kiosk-shift-info').textContent = `${k.shiftStartLocal.slice(0, 5)} (${k.gracePeriodMinutes}m grace)`;
+      document.getElementById('kiosk-shift-info').textContent =
+        formatShiftAndGrace(k.shiftStartLocal, k.gracePeriodMinutes);
       document.getElementById('btn-kiosk-mark-attendance').disabled = false;
       document.getElementById('btn-kiosk-mark-attendance').textContent = 'Mark your attendance';
     }
@@ -363,14 +413,9 @@ function showAttendanceSuccess(data) {
   icon.className = 'result-icon result-icon-success';
   icon.innerHTML = '&#10003;';
   document.getElementById('result-title').textContent = 'Attendance marked successfully';
-  if (data.attendanceMethod === 'PROXY') {
-    document.getElementById('result-subtitle').textContent =
-      `Attendance recorded for ${data.subjectWorkerName} by ${data.actorWorkerName}.`;
-  } else {
-    document.getElementById('result-subtitle').textContent = state.biometricsConfig?.mockMode
-      ? 'Recorded in development mock-biometrics mode.'
-      : 'Your daily attendance has been recorded.';
-  }
+  document.getElementById('result-subtitle').textContent = state.biometricsConfig?.mockMode
+    ? `Recorded in mock-biometrics mode for ${data.subjectWorkerName}.`
+    : `Recorded for ${data.subjectWorkerName} (${data.subjectWorkerCode}).`;
   document.getElementById('result-details').hidden = false;
   document.getElementById('result-worker-name').textContent = `${data.subjectWorkerName} (${data.subjectWorkerCode})`;
   document.getElementById('result-date').textContent = data.attendanceDate;
@@ -380,10 +425,12 @@ function showAttendanceSuccess(data) {
   badge.textContent = data.attendanceStatus === 'LATE' ? 'Late' : 'On time';
   document.getElementById('result-method').textContent = data.attendanceMethod;
   document.getElementById('btn-result-retry').hidden = true;
+  const nextBtn = document.getElementById('btn-result-next-worker');
+  if (nextBtn) nextBtn.hidden = false;
   showView('result');
 }
 
-function showAttendanceFailure(message, allowRetry = true) {
+function showAttendanceFailure(message, allowRetry = true, allowNextWorker = false) {
   stopCamera();
   const icon = document.getElementById('result-icon-wrap');
   icon.className = 'result-icon result-icon-error';
@@ -392,6 +439,8 @@ function showAttendanceFailure(message, allowRetry = true) {
   document.getElementById('result-subtitle').textContent = message;
   document.getElementById('result-details').hidden = true;
   document.getElementById('btn-result-retry').hidden = !allowRetry;
+  const nextBtn = document.getElementById('btn-result-next-worker');
+  if (nextBtn) nextBtn.hidden = !allowNextWorker;
   showView('result');
 }
 
@@ -403,7 +452,7 @@ async function handleCameraCapture(imageBase64, opts = {}) {
   if (!navigator.onLine) {
     stopAutoScan();
     if (state.cameraMode !== 'register') {
-      showAttendanceFailure("You're offline. Your attendance has not been recorded.", true);
+      showAttendanceFailure("You're offline. Your attendance has not been recorded.", true, true);
     } else {
       setBanner('camera-error', "You're offline. Please connect to the internet and try again.");
     }
@@ -432,52 +481,20 @@ async function handleCameraCapture(imageBase64, opts = {}) {
           deviceLabel: navigator.userAgent.slice(0, 80)
         }
       });
-      state.worker = result;
-      await refreshHome(true);
-    } else if (state.cameraMode === 'proxy') {
-      document.getElementById('camera-guidance').textContent = 'Verifying your face...';
-      const targetWorkerCode = document.getElementById('input-proxy-target-code').value.trim() || null;
-      const verify = await apiFetch('/api/v1/biometrics/verify', {
-        method: 'POST',
-        body: {
-          mode: 'PROXY',
-          targetWorkerCode,
-          imageBase64
-        }
-      });
-      stopCamera();
-      state.pendingProxyVerify = verify;
-      setBanner('proxy-confirm-error', '');
-      document.getElementById('proxy-confirm-question').textContent =
-        `You are marking attendance for ${verify.matchedWorkerName} (${verify.matchedWorkerCode}). Continue?`;
-      showView('proxyConfirm');
-    } else if (state.cameraMode === 'kiosk') {
-      document.getElementById('camera-guidance').textContent = 'Recognizing your face...';
-      const verify = await apiFetch('/api/v1/attendance/kiosk/verify', {
-        method: 'POST',
-        body: { imageBase64 }
-      });
-      const checkIn = await apiFetch('/api/v1/attendance/kiosk/check-in', {
-        method: 'POST',
-        headers: { 'Idempotency-Key': state.pendingIdempotencyKey },
-        body: {
-          verificationToken: verify.verificationToken,
-          idempotencyKey: state.pendingIdempotencyKey
-        }
-      });
-      stopAutoScan();
-      showAttendanceSuccess(checkIn);
+      // Keep the phone sessionless so any worker can use or register on it next
+      apiFetch('/api/v1/workers/logout', { method: 'POST' }).catch(() => {});
+      state.worker = null;
+      document.getElementById('input-invite-code').value = '';
+      await showKioskHome(
+        `Registered ${result.fullName || state.fullName} (${result.workerCode})! You can now mark attendance below.`
+      );
     } else {
-      document.getElementById('camera-guidance').textContent = 'Verifying your face...';
-      const verify = await apiFetch('/api/v1/biometrics/verify', {
-        method: 'POST',
-        body: { mode: 'SELF', imageBase64 }
-      });
-      const checkIn = await apiFetch('/api/v1/attendance/check-in', {
+      document.getElementById('camera-guidance').textContent = 'Recognizing face & marking attendance...';
+      const checkIn = await apiFetch('/api/v1/attendance/kiosk/mark', {
         method: 'POST',
         headers: { 'Idempotency-Key': state.pendingIdempotencyKey },
         body: {
-          verificationToken: verify.verificationToken,
+          imageBase64,
           idempotencyKey: state.pendingIdempotencyKey
         }
       });
@@ -491,15 +508,23 @@ async function handleCameraCapture(imageBase64, opts = {}) {
     } else if (err instanceof ApiError && err.code === 'ALREADY_MARKED') {
       stopAutoScan();
       setScanning(false);
-      showAttendanceFailure(err.message, false);
+      showAttendanceFailure(err.message, false, true);
     } else if (fromAuto && err instanceof ApiError
-      && (err.code === 'NO_FACE_DETECTED' || err.code === 'MULTIPLE_FACES_DETECTED' || err.code === 'FACE_TOO_BLURRY' || err.code === 'FACE_TOO_SMALL')) {
+      && (err.code === 'NO_FACE_DETECTED' || err.code === 'MULTIPLE_FACES_DETECTED'
+        || err.code === 'FACE_TOO_BLURRY' || err.code === 'FACE_TOO_SMALL'
+        || err.code === 'POSE_NOT_FRONTAL' || err.code === 'POOR_LIGHTING')) {
       document.getElementById('camera-guidance').textContent =
         err.message || 'Hold still with a single face inside the oval...';
     } else if (err instanceof ApiError && err.code === 'FACE_NOT_RECOGNIZED') {
-      stopAutoScan();
-      setScanning(false);
-      showAttendanceFailure(err.message || 'Face did not match any registered worker. Please try again in better lighting.', true);
+      if (fromAuto && state.autoRecognitionMisses < 2) {
+        state.autoRecognitionMisses += 1;
+        document.getElementById('camera-guidance').textContent =
+          'Hold steady in good lighting — verifying your face...';
+      } else {
+        stopAutoScan();
+        setScanning(false);
+        showAttendanceFailure(err.message || 'Face did not match any registered worker. Please try again in better lighting.', true, true);
+      }
     } else {
       stopAutoScan();
       setScanning(false);
@@ -597,20 +622,18 @@ async function init() {
     document.getElementById('home-offline-banner').hidden = false;
   });
 
-  try {
-    state.biometricsConfig = await apiFetch('/api/v1/biometrics/config');
-    if (state.biometricsConfig.mockMode) {
+  // Always run sessionless multi-worker kiosk mode: clear any stale legacy worker session cookie
+  apiFetch('/api/v1/workers/logout', { method: 'POST' }).catch(() => {});
+
+  const [bioCfg] = await Promise.all([
+    apiFetch('/api/v1/biometrics/config').catch(() => null),
+    showKioskHome()
+  ]);
+  if (bioCfg) {
+    state.biometricsConfig = bioCfg;
+    if (bioCfg.mockMode) {
       document.getElementById('mock-mode-badge').hidden = false;
     }
-  } catch {
-    // Non-fatal
-  }
-
-  try {
-    state.worker = await apiFetch('/api/v1/workers/me');
-    await refreshHome(false);
-  } catch {
-    await showKioskHome();
   }
 }
 
@@ -711,10 +734,8 @@ document.getElementById('btn-camera-cancel').addEventListener('click', () => {
   stopCamera();
   if (state.cameraMode === 'register') {
     showView('consent');
-  } else if (state.cameraMode === 'kiosk' && !state.worker) {
-    showKioskHome();
   } else {
-    refreshHome(false);
+    showKioskHome();
   }
 });
 
@@ -729,16 +750,11 @@ document.getElementById('btn-capture-action').addEventListener('click', async ()
 });
 
 document.getElementById('btn-proxy-confirm-submit').addEventListener('click', submitProxyConfirmation);
-document.getElementById('btn-proxy-confirm-cancel').addEventListener('click', () => refreshHome(false));
+document.getElementById('btn-proxy-confirm-cancel').addEventListener('click', () => showKioskHome());
 
+document.getElementById('btn-result-next-worker')?.addEventListener('click', () => openCameraView('kiosk'));
 document.getElementById('btn-result-retry').addEventListener('click', () => openCameraView(state.cameraMode));
-document.getElementById('btn-result-done').addEventListener('click', () => {
-  if (state.worker) {
-    refreshHome(false);
-  } else {
-    showKioskHome();
-  }
-});
+document.getElementById('btn-result-done').addEventListener('click', () => showKioskHome());
 
 document.getElementById('btn-switch-worker').addEventListener('click', async () => {
   await apiFetch('/api/v1/workers/logout', { method: 'POST' }).catch(() => {});

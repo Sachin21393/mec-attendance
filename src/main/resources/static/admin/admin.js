@@ -7,7 +7,8 @@ const state = {
   team: '',
   page: 0,
   size: 25,
-  activeTab: 'dashboard'
+  activeTab: 'dashboard',
+  shiftStartLocal: '09:00'
 };
 
 const bannerTimers = new Map();
@@ -326,7 +327,7 @@ function openManualExceptionDrawer(workerId, fullName, workerCode, date) {
       </div>
       <div class="field">
         <label for="man-time">Check-in local time</label>
-        <input id="man-time" class="input" type="time" value="09:00">
+        <input id="man-time" class="input" type="time" value="${escapeHtml(state.shiftStartLocal || '09:00')}">
       </div>
       <div class="field">
         <label for="man-reason">Exception reason (required)</label>
@@ -447,7 +448,7 @@ async function loadWorkersTable() {
         <td>${escapeHtml(w.fullName)}</td>
         <td>${escapeHtml(w.teamName || '-')}</td>
         <td>${escapeHtml(w.status)}</td>
-        <td>${w.biometricsEnrolled ? 'Enrolled' : 'Not enrolled'}</td>
+        <td>${w.biometricsEnrolled ? (w.reEnrollRequired ? '<span style="color:var(--warn-text,#b45309);font-weight:600;">Re-enroll needed</span>' : 'Enrolled') : 'Not enrolled'}</td>
         <td>${w.activeSessions}</td>
         <td>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -685,7 +686,8 @@ async function loadCalendarAndSettings() {
 
     document.getElementById('set-workplace-name').value = s.workplaceName;
     document.getElementById('set-timezone').value = s.timezoneId;
-    document.getElementById('set-shift-start').value = s.shiftStartLocal.slice(0, 5);
+    state.shiftStartLocal = s.shiftStartLocal.slice(0, 5);
+    document.getElementById('set-shift-start').value = state.shiftStartLocal;
     document.getElementById('set-grace-minutes').value = s.gracePeriodMinutes;
     document.getElementById('set-absence-cutoff').value = s.absenceCutoffLocal.slice(0, 5);
     document.getElementById('set-proxy-cap').value = s.maxProxyPerActorPerDay;
@@ -911,6 +913,7 @@ document.getElementById('form-settings').addEventListener('submit', async (e) =>
   }
   try {
     await apiFetch('/api/v1/admin/settings', { method: 'PUT', body });
+    state.shiftStartLocal = body.shiftStartLocal;
     showSettingsFeedback('Workplace and attendance settings saved.');
     await loadDashboardAndGrid();
   } catch (err) {

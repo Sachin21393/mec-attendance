@@ -5,9 +5,17 @@ spring:
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: ${DB_POOL_MAX:5}
+      maximum-pool-size: ${DB_POOL_MAX:4}
+      minimum-idle: 1
   flyway:
     locations: classpath:db/migration
+
+server:
+  tomcat:
+    threads:
+      max: ${TOMCAT_MAX_THREADS:20}
+      min-spare: 4
+    max-connections: 100
 
 management:
   endpoint:

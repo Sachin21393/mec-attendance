@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mec-team-shell-v7';
+const CACHE_NAME = 'mec-team-shell-v8';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

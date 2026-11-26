@@ -42,4 +42,19 @@ if [ -n "${PORT:-}" ]; then
   export SERVER_PORT="$PORT"
 fi
 
-exec java -XX:MaxRAMPercentage=50.0 -XX:MaxMetaspaceSize=110m -jar /app/app.jar "$@"
+# Prevent glibc from allocating 64 MiB per-thread malloc arenas across Tomcat worker threads
+export MALLOC_ARENA_MAX=2
+export MALLOC_TRIM_THRESHOLD_=131072
+export MALLOC_MMAP_THRESHOLD_=131072
+
+# Bounded JVM + SerialGC heap/metaspace/direct limits leave native headroom for ONNX models inside Render's 512 MiB cap
+exec java \
+  -Xms96m \
+  -Xmx180m \
+  -XX:MaxMetaspaceSize=96m \
+  -XX:ReservedCodeCacheSize=48m \
+  -XX:MaxDirectMemorySize=32m \
+  -XX:+UseSerialGC \
+  -Xss256k \
+  -Djava.awt.headless=true \
+  -jar /app/app.jar "$@"

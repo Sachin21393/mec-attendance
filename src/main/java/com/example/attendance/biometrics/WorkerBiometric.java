@@ -103,4 +103,8 @@ public class WorkerBiometric {
     public String getConsentVersion() {
         return consentVersion;
     }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
 }

@@ -80,7 +80,7 @@ public class AdminBootstrapRunner implements ApplicationRunner {
                 properties.getDefaults().getProxyCap(),
                 true,
                 properties.getBiometrics().getMatchThreshold(),
-                "yunet-2023mar+sface-2021dec",
+                "yunet-2023mar+sface-2021dec-rgb255",
                 now,
                 null,
                 now

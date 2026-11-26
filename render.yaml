@@ -28,7 +28,7 @@ services:
       - key: ADMIN_BOOTSTRAP_PASSWORD
         sync: false
       - key: DB_POOL_MAX
-        value: "5"
+        value: "4"
       - key: ATTENDANCE_DEFAULT_TIMEZONE
         value: Asia/Kolkata
 

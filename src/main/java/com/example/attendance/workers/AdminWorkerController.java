@@ -4,6 +4,8 @@ import com.example.attendance.audit.AuditActorType;
 import com.example.attendance.audit.AuditService;
 import com.example.attendance.auth.AdminPrincipal;
 import com.example.attendance.auth.TokenHashUtil;
+import com.example.attendance.biometrics.FaceRecognitionProvider;
+import com.example.attendance.biometrics.WorkerBiometric;
 import com.example.attendance.biometrics.WorkerBiometricRepository;
 import com.example.attendance.common.ConflictException;
 import com.example.attendance.common.ResourceNotFoundException;
@@ -46,6 +48,7 @@ public class AdminWorkerController {
     private final WorkerSessionRepository sessionRepository;
     private final WorkerOnboardingService onboardingService;
     private final AdminWorkerDeletionService deletionService;
+    private final FaceRecognitionProvider faceProvider;
     private final AuditService auditService;
 
     public AdminWorkerController(
@@ -55,6 +58,7 @@ public class AdminWorkerController {
             WorkerSessionRepository sessionRepository,
             WorkerOnboardingService onboardingService,
             AdminWorkerDeletionService deletionService,
+            FaceRecognitionProvider faceProvider,
             AuditService auditService
     ) {
         this.workerRepository = workerRepository;
@@ -63,6 +67,7 @@ public class AdminWorkerController {
         this.sessionRepository = sessionRepository;
         this.onboardingService = onboardingService;
         this.deletionService = deletionService;
+        this.faceProvider = faceProvider;
         this.auditService = auditService;
     }
 
@@ -88,11 +93,7 @@ public class AdminWorkerController {
         int to = Math.min(from + safeSize, filtered.size());
 
         List<WorkerSummaryDto> dtos = filtered.subList(from, to).stream()
-                .map(w -> WorkerSummaryDto.from(
-                        w,
-                        biometricRepository.findByWorkerId(w.getId()).isPresent(),
-                        sessionRepository.findByWorkerIdAndRevokedAtUtcIsNull(w.getId()).size()
-                ))
+                .map(w -> toSummaryDto(w, sessionRepository.findByWorkerIdAndRevokedAtUtcIsNull(w.getId()).size()))
                 .toList();
 
         return new PageImpl<>(dtos, PageRequest.of(safePage, safeSize), filtered.size());
@@ -361,6 +362,18 @@ public class AdminWorkerController {
         return active.size();
     }
 
+    private WorkerSummaryDto toSummaryDto(Worker worker, int activeSessions) {
+        var bioOpt = biometricRepository.findByWorkerId(worker.getId());
+        boolean enrolled = bioOpt.isPresent();
+        boolean reEnrollRequired = false;
+        if (enrolled) {
+            WorkerBiometric bio = bioOpt.get();
+            reEnrollRequired = !faceProvider.modelName().equals(bio.getEmbeddingModel())
+                    || !faceProvider.modelVersion().equals(bio.getModelVersion());
+        }
+        return WorkerSummaryDto.from(worker, enrolled, reEnrollRequired, activeSessions);
+    }
+
     public record CreateWorkerRequest(
             @NotBlank(message = "Worker code is required") @Size(max = 40) String workerCode,
             @NotBlank(message = "Full name is required") @Size(max = 160) String fullName,
@@ -390,9 +403,14 @@ public class AdminWorkerController {
             LocalDate employmentStartDate,
             LocalDate employmentEndDate,
             boolean biometricsEnrolled,
+            boolean reEnrollRequired,
             int activeSessions
     ) {
         public static WorkerSummaryDto from(Worker worker, boolean biometricsEnrolled, int activeSessions) {
+            return from(worker, biometricsEnrolled, false, activeSessions);
+        }
+
+        public static WorkerSummaryDto from(Worker worker, boolean biometricsEnrolled, boolean reEnrollRequired, int activeSessions) {
             return new WorkerSummaryDto(
                     worker.getId(),
                     worker.getWorkerCode(),
@@ -402,6 +420,7 @@ public class AdminWorkerController {
                     worker.getEmploymentStartDate(),
                     worker.getEmploymentEndDate(),
                     biometricsEnrolled,
+                    reEnrollRequired,
                     activeSessions
             );
         }

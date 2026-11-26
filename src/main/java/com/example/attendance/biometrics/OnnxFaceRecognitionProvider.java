@@ -3,6 +3,7 @@ package com.example.attendance.biometrics;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
+import ai.onnxruntime.OrtLoggingLevel;
 import ai.onnxruntime.OrtSession;
 import com.example.attendance.common.AttendanceProperties;
 import com.example.attendance.common.ValidationException;
@@ -25,6 +26,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Server-side face detection and recognition provider using OpenCV Zoo ONNX models:
@@ -46,7 +51,8 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
 
     private static final int YUNET_INPUT_SIZE = 640;
     private static final int SFACE_INPUT_SIZE = 112;
-    private static final float YUNET_SCORE_THRESHOLD = 0.60f;
+    private static final int MAX_WORKING_IMAGE_SIDE = 960;
+    private static final float YUNET_SCORE_THRESHOLD = 0.65f;
     private static final float YUNET_NMS_THRESHOLD = 0.30f;
     private static final float MIN_FACE_PIXELS = 48f;
     private static final int[] STRIDES = {8, 16, 32};
@@ -66,6 +72,11 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
     private final OrtEnvironment env;
     private final OrtSession yunetSession;
     private final OrtSession sfaceSession;
+    private final ExecutorService onnxExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "onnx-inference");
+        t.setDaemon(true);
+        return t;
+    });
 
     public OnnxFaceRecognitionProvider(AttendanceProperties properties, ImagePayloadValidator imageValidator) {
         this.imageValidator = imageValidator;
@@ -83,12 +94,17 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
                     + ". See docs/biometrics-calibration.md for setup.");
         }
 
-        try {
+        try (OrtSession.SessionOptions opts = new OrtSession.SessionOptions()) {
+            // Keep ONNX native threads and arenas bounded for 512 MiB cloud containers
+            opts.setIntraOpNumThreads(1);
+            opts.setInterOpNumThreads(1);
+            opts.setCPUArenaAllocator(false);
+            opts.setMemoryPatternOptimization(false);
+            opts.setSessionLogLevel(OrtLoggingLevel.ORT_LOGGING_LEVEL_ERROR);
             this.env = OrtEnvironment.getEnvironment();
-            OrtSession.SessionOptions opts = new OrtSession.SessionOptions();
             this.yunetSession = env.createSession(yunetPath.toString(), opts);
             this.sfaceSession = env.createSession(sfacePath.toString(), opts);
-            log.info("Initialized OnnxFaceRecognitionProvider (YuNet + SFace 128D). Note: passive quality checks only; no dedicated PAD liveness model active.");
+            log.info("Initialized OnnxFaceRecognitionProvider (YuNet + SFace 128D RGB[0..255], single-thread bounded memory).");
         } catch (OrtException e) {
             throw new IllegalStateException("Failed to initialize ONNX Runtime sessions", e);
         }
@@ -96,6 +112,7 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
 
     @PreDestroy
     public void close() {
+        onnxExecutor.shutdownNow();
         try {
             if (yunetSession != null) yunetSession.close();
             if (sfaceSession != null) sfaceSession.close();
@@ -106,9 +123,9 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
 
     @Override
     public ExtractionResult extractEmbedding(byte[] imageBytes) {
-        BufferedImage decoded = imageValidator.decodeAndValidateImage(imageBytes);
+        BufferedImage decoded = capWorkingResolution(imageValidator.decodeAndValidateImage(imageBytes));
         LetterboxImage lb = letterbox(decoded, YUNET_INPUT_SIZE);
-        List<DetectedFace> faces = detectFaces(lb.image());
+        List<DetectedFace> faces = runOnSingleOnnxThread(() -> detectFaces(lb.image()));
 
         if (faces.isEmpty()) {
             throw new ValidationException("NO_FACE_DETECTED", "No face detected. Place your face inside the frame.");
@@ -145,8 +162,22 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
         }
 
         BufferedImage aligned112 = alignFace112(decoded, origFace);
-        float[] embedding = runSface(aligned112);
+        float[] embedding = runOnSingleOnnxThread(() -> runSface(aligned112));
         return new ExtractionResult(embedding, 1, origFace.score, true, "passive-quality-only-no-pad");
+    }
+
+    private <T> T runOnSingleOnnxThread(Callable<T> task) {
+        try {
+            return onnxExecutor.submit(task).get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted during face recognition inference", e);
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof RuntimeException re) {
+                throw re;
+            }
+            throw new IllegalStateException("Face recognition inference failed", e.getCause());
+        }
     }
 
     @Override
@@ -177,7 +208,7 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
 
     @Override
     public String modelVersion() {
-        return "yunet-2023mar+sface-2021dec";
+        return "yunet-2023mar+sface-2021dec-rgb255";
     }
 
     @Override
@@ -191,7 +222,7 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
     }
 
     private List<DetectedFace> detectFaces(BufferedImage img640) {
-        float[] tensorData = toBgrChwFloat(img640, false);
+        float[] tensorData = toChwFloat0To255(img640, false);
         long[] shape = {1, 3, YUNET_INPUT_SIZE, YUNET_INPUT_SIZE};
 
         try (OnnxTensor input = OnnxTensor.createTensor(env, FloatBuffer.wrap(tensorData), shape);
@@ -238,7 +269,8 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
     }
 
     private float[] runSface(BufferedImage face112) {
-        float[] tensorData = toBgrChwFloat(face112, true);
+        // OpenCV FaceRecognizerSF::feature feeds 112x112 RGB [0..255]; the ONNX graph normalizes internally.
+        float[] tensorData = toChwFloat0To255(face112, true);
         long[] shape = {1, 3, SFACE_INPUT_SIZE, SFACE_INPUT_SIZE};
 
         try (OnnxTensor input = OnnxTensor.createTensor(env, FloatBuffer.wrap(tensorData), shape);
@@ -356,6 +388,22 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
         return out;
     }
 
+    private static BufferedImage capWorkingResolution(BufferedImage src) {
+        int maxDim = Math.max(src.getWidth(), src.getHeight());
+        if (maxDim <= MAX_WORKING_IMAGE_SIDE) {
+            return src;
+        }
+        double scale = (double) MAX_WORKING_IMAGE_SIDE / maxDim;
+        int w = Math.max(1, (int) Math.round(src.getWidth() * scale));
+        int h = Math.max(1, (int) Math.round(src.getHeight() * scale));
+        BufferedImage resized = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = resized.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.drawImage(src, 0, 0, w, h, null);
+        g.dispose();
+        return resized;
+    }
+
     private static LetterboxImage letterbox(BufferedImage src, int targetSize) {
         double scale = Math.min((double) targetSize / src.getWidth(), (double) targetSize / src.getHeight());
         int newW = (int) Math.round(src.getWidth() * scale);
@@ -373,27 +421,21 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
         return new LetterboxImage(out, (float) scale, padX, padY);
     }
 
-    private static float[] toBgrChwFloat(BufferedImage img, boolean normalizeMinusOneToOne) {
+    private static float[] toChwFloat0To255(BufferedImage img, boolean rgbOrder) {
         int w = img.getWidth();
         int h = img.getHeight();
         int hw = w * h;
+        int[] pixels = new int[hw];
+        img.getRGB(0, 0, w, h, pixels, 0, w);
         float[] out = new float[3 * hw];
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                int rgb = img.getRGB(x, y);
-                float r = (rgb >> 16) & 0xFF;
-                float g = (rgb >> 8) & 0xFF;
-                float b = rgb & 0xFF;
-                if (normalizeMinusOneToOne) {
-                    b = (b - 127.5f) / 127.5f;
-                    g = (g - 127.5f) / 127.5f;
-                    r = (r - 127.5f) / 127.5f;
-                }
-                int idx = y * w + x;
-                out[idx] = b;
-                out[hw + idx] = g;
-                out[2 * hw + idx] = r;
-            }
+        for (int idx = 0; idx < hw; idx++) {
+            int argb = pixels[idx];
+            float r = (argb >> 16) & 0xFF;
+            float g = (argb >> 8) & 0xFF;
+            float b = argb & 0xFF;
+            out[idx] = rgbOrder ? r : b;
+            out[hw + idx] = g;
+            out[2 * hw + idx] = rgbOrder ? b : r;
         }
         return out;
     }

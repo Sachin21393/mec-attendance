@@ -21,6 +21,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class BiometricsVerificationService {
@@ -34,6 +37,7 @@ public class BiometricsVerificationService {
     private final AttendanceSettingsRepository settingsRepository;
     private final AttendanceProperties properties;
     private final AuditService auditService;
+    private final Map<UUID, CachedTemplate> templateCache = new ConcurrentHashMap<>();
 
     public BiometricsVerificationService(
             FaceRecognitionProvider faceProvider,
@@ -247,11 +251,10 @@ public class BiometricsVerificationService {
     private MatchCandidate matchSpecificWorker(Worker target, float[] probeEmbedding, double threshold) {
         WorkerBiometric bio = biometricRepository.findByWorkerId(target.getId())
                 .orElseThrow(() -> new ValidationException("BIOMETRICS_NOT_ENROLLED", "Face template is not enrolled for this worker."));
-        if (!faceProvider.modelName().equals(bio.getEmbeddingModel())
-                || bio.getEmbeddingDimension() != probeEmbedding.length) {
+        if (!isTemplateCompatible(bio, probeEmbedding.length)) {
             throw new ValidationException("BIOMETRICS_MODEL_MISMATCH", "Enrolled face template must be re-enrolled for the active recognition model.");
         }
-        float[] reference = encryptionService.decrypt(bio.getEncryptedEmbedding(), bio.getEncryptionIv());
+        float[] reference = decryptOrCached(bio);
         double sim = faceProvider.cosineSimilarity(probeEmbedding, reference);
         return sim >= threshold ? new MatchCandidate(target, sim) : null;
     }
@@ -273,9 +276,8 @@ public class BiometricsVerificationService {
         var actorBioOpt = biometricRepository.findByWorkerId(actor.getId());
         if (actorBioOpt.isPresent()) {
             WorkerBiometric actorBio = actorBioOpt.get();
-            if (faceProvider.modelName().equals(actorBio.getEmbeddingModel())
-                    && actorBio.getEmbeddingDimension() == probeEmbedding.length) {
-                float[] actorRef = encryptionService.decrypt(actorBio.getEncryptedEmbedding(), actorBio.getEncryptionIv());
+            if (isTemplateCompatible(actorBio, probeEmbedding.length)) {
+                float[] actorRef = decryptOrCached(actorBio);
                 if (faceProvider.cosineSimilarity(probeEmbedding, actorRef) >= threshold) {
                     throw new ValidationException("SELF_PROXY_NOT_ALLOWED", "Use regular self check-in for your own attendance.");
                 }
@@ -288,27 +290,46 @@ public class BiometricsVerificationService {
 
     private MatchCandidate findBestMatchingWorker(UUID excludeWorkerId, float[] probeEmbedding, double threshold) {
         List<Worker> registered = workerRepository.findByStatusOrderByWorkerCodeAsc(WorkerStatus.REGISTERED);
+        Map<UUID, WorkerBiometric> biometricsByWorker = biometricRepository.findAll().stream()
+                .collect(Collectors.toMap(WorkerBiometric::getWorkerId, Function.identity(), (a, b) -> a));
+
         MatchCandidate best = null;
         for (Worker candidate : registered) {
             if (excludeWorkerId != null && candidate.getId().equals(excludeWorkerId)) {
                 continue;
             }
-            var bioOpt = biometricRepository.findByWorkerId(candidate.getId());
-            if (bioOpt.isEmpty()) {
+            WorkerBiometric bio = biometricsByWorker.get(candidate.getId());
+            if (bio == null || !isTemplateCompatible(bio, probeEmbedding.length)) {
                 continue;
             }
-            WorkerBiometric bio = bioOpt.get();
-            if (!faceProvider.modelName().equals(bio.getEmbeddingModel())
-                    || bio.getEmbeddingDimension() != probeEmbedding.length) {
-                continue;
-            }
-            float[] ref = encryptionService.decrypt(bio.getEncryptedEmbedding(), bio.getEncryptionIv());
+            float[] ref = decryptOrCached(bio);
             double sim = faceProvider.cosineSimilarity(probeEmbedding, ref);
             if (sim >= threshold && (best == null || sim > best.similarity())) {
                 best = new MatchCandidate(candidate, sim);
             }
         }
         return best;
+    }
+
+    private boolean isTemplateCompatible(WorkerBiometric bio, int probeLength) {
+        return faceProvider.modelName().equals(bio.getEmbeddingModel())
+                && faceProvider.modelVersion().equals(bio.getModelVersion())
+                && bio.getEmbeddingDimension() == probeLength;
+    }
+
+    private float[] decryptOrCached(WorkerBiometric bio) {
+        CachedTemplate cached = templateCache.get(bio.getWorkerId());
+        if (cached != null
+                && cached.biometricId().equals(bio.getId())
+                && cached.updatedAt().equals(bio.getUpdatedAt())) {
+            return cached.embedding();
+        }
+        float[] decrypted = encryptionService.decrypt(bio.getEncryptedEmbedding(), bio.getEncryptionIv());
+        templateCache.put(bio.getWorkerId(), new CachedTemplate(bio.getId(), bio.getUpdatedAt(), decrypted));
+        return decrypted;
+    }
+
+    private record CachedTemplate(UUID biometricId, Instant updatedAt, float[] embedding) {
     }
 
     public enum VerificationMode {

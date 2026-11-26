@@ -11,4 +11,6 @@ public interface WorkCalendarRepository extends JpaRepository<WorkCalendarDay, U
     Optional<WorkCalendarDay> findByCalendarDate(LocalDate calendarDate);
 
     List<WorkCalendarDay> findByCalendarDateBetweenOrderByCalendarDateAsc(LocalDate start, LocalDate end);
+
+    List<WorkCalendarDay> findByCalendarDateGreaterThanEqual(LocalDate startDate);
 }

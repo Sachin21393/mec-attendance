@@ -47,6 +47,7 @@
 
       <!-- First Launch / Direct Kiosk Attendance -->
       <section id="view-welcome" class="card" hidden>
+        <div id="kiosk-reg-banner" class="banner banner-success" hidden></div>
         <h2 class="section-heading">Mark Your Attendance</h2>
         <p id="kiosk-workplace-meta" class="helper-text" style="margin-bottom: 14px;">
           Registered workers can scan their face directly to record attendance.
@@ -267,10 +268,13 @@
         </div>
 
         <div class="camera-actions">
+          <button id="btn-result-next-worker" type="button" class="btn btn-primary btn-block" hidden>
+            Scan Next Worker
+          </button>
           <button id="btn-result-retry" type="button" class="btn btn-primary btn-block" hidden>
             Try Again
           </button>
-          <button id="btn-result-done" type="button" class="btn btn-primary btn-block">
+          <button id="btn-result-done" type="button" class="btn btn-secondary btn-block">
             Done
           </button>
         </div>

@@ -108,6 +108,20 @@ public class AdminSettingsService {
         s.setUpdatedAt(now);
         settingsRepository.save(s);
 
+        // Keep today's and upcoming explicit work_calendar rows synced with updated default shift/grace/cutoff settings
+        LocalDate currentWorkplaceDate = calculator.resolveAttendanceDate(now, s);
+        List<WorkCalendarDay> upcomingDays = calendarRepository.findByCalendarDateGreaterThanEqual(currentWorkplaceDate);
+        if (!upcomingDays.isEmpty()) {
+            for (WorkCalendarDay day : upcomingDays) {
+                day.setShiftStartLocal(s.getDefaultShiftStartLocal());
+                day.setGracePeriodMinutes(s.getDefaultGracePeriodMinutes());
+                day.setAbsenceCutoffLocal(s.getDefaultAbsenceCutoffLocal());
+                day.setTimezoneId(s.getTimezoneId());
+                day.setUpdatedAt(now);
+            }
+            calendarRepository.saveAll(upcomingDays);
+        }
+
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("before", before);
         metadata.put("after", Map.of(

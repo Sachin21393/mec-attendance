@@ -120,6 +120,32 @@ public class AttendanceController {
         return checkInService.kioskCheckIn(request.verificationToken(), effectiveIdemKey);
     }
 
+    /**
+     * Single-round-trip kiosk verification + check-in for fast mobile attendance marking.
+     */
+    @PostMapping("/kiosk/mark")
+    public AttendanceCheckInService.CheckInResponse kioskMark(
+            @RequestHeader(value = "Idempotency-Key", required = false) String headerIdempotencyKey,
+            @Valid @RequestBody KioskMarkRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        String key = "kiosk-mark:" + (httpRequest.getRemoteAddr() != null ? httpRequest.getRemoteAddr() : "unknown");
+        rateLimiterService.checkLimit(key, 150, Duration.ofMinutes(5));
+        String effectiveIdemKey = (request.idempotencyKey() != null && !request.idempotencyKey().isBlank())
+                ? request.idempotencyKey()
+                : headerIdempotencyKey;
+        if (effectiveIdemKey == null || effectiveIdemKey.isBlank()) {
+            effectiveIdemKey = java.util.UUID.randomUUID().toString();
+        }
+        var replay = checkInService.findIdempotentReplay(effectiveIdemKey);
+        if (replay.isPresent()) {
+            return replay.get();
+        }
+        BiometricsVerificationService.KioskVerificationOutcome verified =
+                verificationService.verifyKiosk(request.workerCode(), request.imageBase64());
+        return checkInService.kioskCheckIn(verified.verificationToken(), effectiveIdemKey);
+    }
+
     public record CheckInRequest(
             @NotBlank(message = "Verification token is required") String verificationToken,
             String idempotencyKey
@@ -129,6 +155,13 @@ public class AttendanceController {
     public record KioskVerifyRequest(
             @Size(max = 40) String workerCode,
             @NotBlank(message = "Image is required") String imageBase64
+    ) {
+    }
+
+    public record KioskMarkRequest(
+            @Size(max = 40) String workerCode,
+            @NotBlank(message = "Image is required") String imageBase64,
+            String idempotencyKey
     ) {
     }
 }

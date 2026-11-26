@@ -36,6 +36,7 @@ class OnnxProviderRealModelTest {
         try {
             assertThat(provider.isMock()).isFalse();
             assertThat(provider.embeddingDimension()).isEqualTo(128);
+            assertThat(provider.modelVersion()).isEqualTo("yunet-2023mar+sface-2021dec-rgb255");
 
             // Solid gray 320x320 image runs YuNet inference cleanly and rejects with NO_FACE_DETECTED
             BufferedImage img = new BufferedImage(320, 320, BufferedImage.TYPE_INT_RGB);

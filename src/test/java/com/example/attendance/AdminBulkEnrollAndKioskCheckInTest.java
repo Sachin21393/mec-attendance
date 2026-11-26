@@ -241,5 +241,33 @@ class AdminBulkEnrollAndKioskCheckInTest {
                         ))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("ALREADY_MARKED"));
+
+        // Single-round-trip atomic /kiosk/mark works for a different worker (W009) from the same sessionless device
+        String w009Idem = UUID.randomUUID().toString();
+        mockMvc.perform(post("/api/v1/attendance/kiosk/mark")
+                        .with(csrf())
+                        .header("Idempotency-Key", w009Idem)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "imageBase64", w009Face,
+                                "idempotencyKey", w009Idem
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.subjectWorkerCode").value("W009"))
+                .andExpect(jsonPath("$.subjectWorkerName").value("Deepak Kulkarni"))
+                .andExpect(jsonPath("$.attendanceMethod").value("SELF"))
+                .andExpect(jsonPath("$.idempotentReplay").value(false));
+
+        // Repeat same /kiosk/mark without same idempotency key includes worker name in ALREADY_MARKED
+        mockMvc.perform(post("/api/v1/attendance/kiosk/mark")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "imageBase64", w009Face,
+                                "idempotencyKey", UUID.randomUUID().toString()
+                        ))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ALREADY_MARKED"))
+                .andExpect(jsonPath("$.message", org.hamcrest.Matchers.containsString("Deepak Kulkarni")));
     }
 }

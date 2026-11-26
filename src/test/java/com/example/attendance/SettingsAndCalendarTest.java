@@ -217,5 +217,39 @@ class SettingsAndCalendarTest {
 
         assertThat(auditEventRepository.findAllByOrderByEventTimestampUtcDesc(PageRequest.of(0, 10))
                 .stream().anyMatch(e -> "SETTINGS_UPDATED".equals(e.getEventType()))).isTrue();
+
+        // Saving shift timing/grace in settings must propagate to explicit work_calendar rows from today onward
+        String kioskStatusJson = mockMvc.perform(get("/api/v1/attendance/kiosk/status"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String todayMonth = objectMapper.readTree(kioskStatusJson).get("attendanceDate").asText().substring(0, 7);
+
+        mockMvc.perform(put("/api/v1/admin/calendar?month=" + todayMonth)
+                        .with(csrf())
+                        .cookie(techCookie)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("weeklyOffDays", List.of("SUNDAY")))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(put("/api/v1/admin/settings")
+                        .with(csrf())
+                        .cookie(techCookie)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "workplaceName", "Metro Plant B",
+                                "timezoneId", "Asia/Kolkata",
+                                "shiftStartLocal", "14:00",
+                                "gracePeriodMinutes", 20,
+                                "absenceCutoffLocal", "22:00",
+                                "proxyEnabled", true,
+                                "maxProxyPerActorPerDay", 3,
+                                "faceMatchThreshold", 0.42
+                        ))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/attendance/kiosk/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.shiftStartLocal").value("14:00"))
+                .andExpect(jsonPath("$.gracePeriodMinutes").value(20));
     }
 }
