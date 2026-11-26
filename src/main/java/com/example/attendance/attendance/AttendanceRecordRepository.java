@@ -12,6 +12,8 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 
     Optional<AttendanceRecord> findByIdempotencyKey(String idempotencyKey);
 
+    Optional<AttendanceRecord> findByLogoutIdempotencyKey(String logoutIdempotencyKey);
+
     List<AttendanceRecord> findByAttendanceDateBetween(LocalDate start, LocalDate end);
 
     List<AttendanceRecord> findBySubjectWorkerIdAndAttendanceDateBetweenOrderByAttendanceDateAsc(

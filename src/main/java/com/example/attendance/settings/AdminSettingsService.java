@@ -89,6 +89,9 @@ public class AdminSettingsService {
         s.setDefaultShiftStartLocal(req.shiftStartLocal());
         s.setDefaultGracePeriodMinutes(req.gracePeriodMinutes());
         s.setDefaultAbsenceCutoffLocal(req.absenceCutoffLocal());
+        if (req.shiftEndLocal() != null) {
+            s.setDefaultShiftEndLocal(req.shiftEndLocal());
+        }
         s.setProxyEnabled(req.proxyEnabled());
         s.setMaxProxyPerActorPerDay(req.maxProxyPerActorPerDay());
         if (req.proxyCapCountsSuccessfulOnly() != null) {
@@ -108,7 +111,7 @@ public class AdminSettingsService {
         s.setUpdatedAt(now);
         settingsRepository.save(s);
 
-        // Keep today's and upcoming explicit work_calendar rows synced with updated default shift/grace/cutoff settings
+        // Keep today's and upcoming explicit work_calendar rows synced with updated default shift/grace/logout/cutoff settings
         LocalDate currentWorkplaceDate = calculator.resolveAttendanceDate(now, s);
         List<WorkCalendarDay> upcomingDays = calendarRepository.findByCalendarDateGreaterThanEqual(currentWorkplaceDate);
         if (!upcomingDays.isEmpty()) {
@@ -116,6 +119,7 @@ public class AdminSettingsService {
                 day.setShiftStartLocal(s.getDefaultShiftStartLocal());
                 day.setGracePeriodMinutes(s.getDefaultGracePeriodMinutes());
                 day.setAbsenceCutoffLocal(s.getDefaultAbsenceCutoffLocal());
+                day.setShiftEndLocal(s.getDefaultShiftEndLocal());
                 day.setTimezoneId(s.getTimezoneId());
                 day.setUpdatedAt(now);
             }
@@ -161,6 +165,7 @@ public class AdminSettingsService {
                     dc.shiftStartLocal(),
                     dc.gracePeriodMinutes(),
                     dc.absenceCutoffLocal(),
+                    dc.shiftEndLocal(),
                     dc.timezone().getId(),
                     dc.note(),
                     saved != null
@@ -190,7 +195,8 @@ public class AdminSettingsService {
                 DayType type = offDays.contains(date.getDayOfWeek()) ? DayType.WEEKLY_OFF : DayType.WORKING;
                 upsertDay(existingMap, date, type, settings.getDefaultShiftStartLocal(),
                         settings.getDefaultGracePeriodMinutes(), settings.getDefaultAbsenceCutoffLocal(),
-                        settings.getTimezoneId(), type == DayType.WEEKLY_OFF ? "Weekly Off" : null,
+                        settings.getDefaultShiftEndLocal(), settings.getTimezoneId(),
+                        type == DayType.WEEKLY_OFF ? "Weekly Off" : null,
                         admin != null ? admin.adminUserId() : null, now);
             }
         }
@@ -203,7 +209,8 @@ public class AdminSettingsService {
                 LocalTime shiftStart = item.shiftStartLocal() != null ? item.shiftStartLocal() : settings.getDefaultShiftStartLocal();
                 int grace = item.gracePeriodMinutes() != null ? item.gracePeriodMinutes() : settings.getDefaultGracePeriodMinutes();
                 LocalTime cutoff = item.absenceCutoffLocal() != null ? item.absenceCutoffLocal() : settings.getDefaultAbsenceCutoffLocal();
-                upsertDay(existingMap, item.date(), item.dayType(), shiftStart, grace, cutoff,
+                LocalTime shiftEnd = item.shiftEndLocal() != null ? item.shiftEndLocal() : settings.getDefaultShiftEndLocal();
+                upsertDay(existingMap, item.date(), item.dayType(), shiftStart, grace, cutoff, shiftEnd,
                         settings.getTimezoneId(), item.note(), admin != null ? admin.adminUserId() : null, now);
             }
         }
@@ -245,7 +252,8 @@ public class AdminSettingsService {
             DayType type = weekdayPattern.getOrDefault(date.getDayOfWeek(), DayType.WORKING);
             upsertDay(targetMap, date, type, settings.getDefaultShiftStartLocal(),
                     settings.getDefaultGracePeriodMinutes(), settings.getDefaultAbsenceCutoffLocal(),
-                    settings.getTimezoneId(), type == DayType.WEEKLY_OFF ? "Weekly Off (Copied)" : null,
+                    settings.getDefaultShiftEndLocal(), settings.getTimezoneId(),
+                    type == DayType.WEEKLY_OFF ? "Weekly Off (Copied)" : null,
                     admin != null ? admin.adminUserId() : null, now);
         }
     }
@@ -257,6 +265,7 @@ public class AdminSettingsService {
             LocalTime shiftStart,
             int graceMinutes,
             LocalTime cutoff,
+            LocalTime shiftEnd,
             String timezoneId,
             String note,
             UUID adminId,
@@ -264,13 +273,14 @@ public class AdminSettingsService {
     ) {
         WorkCalendarDay entity = existingMap.get(date);
         if (entity == null) {
-            entity = new WorkCalendarDay(UUID.randomUUID(), date, dayType, shiftStart, graceMinutes, cutoff, timezoneId, note, adminId, now);
+            entity = new WorkCalendarDay(UUID.randomUUID(), date, dayType, shiftStart, graceMinutes, cutoff, shiftEnd, timezoneId, note, adminId, now);
             existingMap.put(date, entity);
         } else {
             entity.setDayType(dayType);
             entity.setShiftStartLocal(shiftStart);
             entity.setGracePeriodMinutes(graceMinutes);
             entity.setAbsenceCutoffLocal(cutoff);
+            entity.setShiftEndLocal(shiftEnd);
             entity.setTimezoneId(timezoneId);
             entity.setNote(note);
             entity.setUpdatedAt(now);
@@ -297,6 +307,7 @@ public class AdminSettingsService {
             LocalTime shiftStartLocal,
             int gracePeriodMinutes,
             LocalTime absenceCutoffLocal,
+            LocalTime shiftEndLocal,
             boolean proxyEnabled,
             int maxProxyPerActorPerDay,
             boolean proxyCapCountsSuccessfulOnly,
@@ -314,6 +325,7 @@ public class AdminSettingsService {
                     s.getDefaultShiftStartLocal(),
                     s.getDefaultGracePeriodMinutes(),
                     s.getDefaultAbsenceCutoffLocal(),
+                    s.getDefaultShiftEndLocal(),
                     s.isProxyEnabled(),
                     s.getMaxProxyPerActorPerDay(),
                     s.isProxyCapCountsSuccessfulOnly(),
@@ -332,6 +344,7 @@ public class AdminSettingsService {
             @NotNull(message = "Shift start time is required") LocalTime shiftStartLocal,
             int gracePeriodMinutes,
             @NotNull(message = "Absence cutoff time is required") LocalTime absenceCutoffLocal,
+            LocalTime shiftEndLocal,
             boolean proxyEnabled,
             int maxProxyPerActorPerDay,
             Boolean proxyCapCountsSuccessfulOnly,
@@ -347,6 +360,7 @@ public class AdminSettingsService {
             LocalTime shiftStartLocal,
             int gracePeriodMinutes,
             LocalTime absenceCutoffLocal,
+            LocalTime shiftEndLocal,
             String timezoneId,
             String note,
             boolean configured
@@ -367,6 +381,7 @@ public class AdminSettingsService {
             LocalTime shiftStartLocal,
             Integer gracePeriodMinutes,
             LocalTime absenceCutoffLocal,
+            LocalTime shiftEndLocal,
             String note
     ) {
     }

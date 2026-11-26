@@ -59,13 +59,20 @@
             <strong id="kiosk-date">-</strong>
           </div>
           <div class="status-summary-row">
-            <span class="helper-text">Shift start</span>
+            <span class="helper-text">Login shift</span>
             <strong id="kiosk-shift-info">-</strong>
+          </div>
+          <div class="status-summary-row">
+            <span class="helper-text">Logout time</span>
+            <strong id="kiosk-logout-info">-</strong>
           </div>
         </div>
 
-        <button id="btn-kiosk-mark-attendance" type="button" class="btn btn-primary btn-block btn-large">
-          Mark your attendance
+        <button id="btn-kiosk-login" type="button" class="btn btn-primary btn-block btn-large">
+          Login Attendance
+        </button>
+        <button id="btn-kiosk-logout" type="button" class="btn btn-secondary btn-block btn-large" style="margin-top: 10px;">
+          Logout Attendance
         </button>
 
         <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-subtle); text-align: center;">
@@ -253,8 +260,12 @@
             <span class="helper-text">Date</span>
             <strong id="result-date">-</strong>
           </div>
+          <div id="result-login-row" class="status-summary-row" hidden>
+            <span class="helper-text">Login time</span>
+            <strong id="result-login-time">-</strong>
+          </div>
           <div class="status-summary-row">
-            <span class="helper-text">Time</span>
+            <span id="result-time-label" class="helper-text">Time</span>
             <strong id="result-time">-</strong>
           </div>
           <div class="status-summary-row">
@@ -262,8 +273,8 @@
             <span id="result-status-badge" class="status-badge status-ontime">ON_TIME</span>
           </div>
           <div class="status-summary-row">
-            <span class="helper-text">Method</span>
-            <strong id="result-method">SELF</strong>
+            <span class="helper-text">Type</span>
+            <strong id="result-method">Login Attendance</strong>
           </div>
         </div>
 

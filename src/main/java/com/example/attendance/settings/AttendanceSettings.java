@@ -31,6 +31,9 @@ public class AttendanceSettings {
     @Column(name = "default_absence_cutoff_local", nullable = false)
     private LocalTime defaultAbsenceCutoffLocal;
 
+    @Column(name = "default_shift_end_local", nullable = false)
+    private LocalTime defaultShiftEndLocal = LocalTime.of(18, 0);
+
     @Column(name = "proxy_enabled", nullable = false)
     private boolean proxyEnabled;
 
@@ -83,6 +86,7 @@ public class AttendanceSettings {
         this.defaultShiftStartLocal = defaultShiftStartLocal;
         this.defaultGracePeriodMinutes = defaultGracePeriodMinutes;
         this.defaultAbsenceCutoffLocal = defaultAbsenceCutoffLocal;
+        this.defaultShiftEndLocal = LocalTime.of(18, 0);
         this.proxyEnabled = proxyEnabled;
         this.maxProxyPerActorPerDay = maxProxyPerActorPerDay;
         this.proxyCapCountsSuccessfulOnly = proxyCapCountsSuccessfulOnly;
@@ -136,6 +140,14 @@ public class AttendanceSettings {
 
     public void setDefaultAbsenceCutoffLocal(LocalTime defaultAbsenceCutoffLocal) {
         this.defaultAbsenceCutoffLocal = defaultAbsenceCutoffLocal;
+    }
+
+    public LocalTime getDefaultShiftEndLocal() {
+        return defaultShiftEndLocal;
+    }
+
+    public void setDefaultShiftEndLocal(LocalTime defaultShiftEndLocal) {
+        this.defaultShiftEndLocal = defaultShiftEndLocal;
     }
 
     public boolean isProxyEnabled() {

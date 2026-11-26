@@ -41,7 +41,9 @@ public class AdminReportsService {
                         r.lateDays(),
                         r.absentDays(),
                         r.holidayDays(),
-                        r.weeklyOffDays()
+                        r.weeklyOffDays(),
+                        r.earlyLogoutDays(),
+                        r.extendedWorkHoursDays()
                 ))
                 .toList();
         return new ReportPreviewResponse(
@@ -72,6 +74,8 @@ public class AdminReportsService {
         headers.add("Absent Days");
         headers.add("Holiday Days");
         headers.add("Weekly Off Days");
+        headers.add("Early Logouts");
+        headers.add("Extended Work Hours");
 
         for (MonthlyAttendanceQueryService.GridDayHeader d : grid.days()) {
             String ds = d.date().toString();
@@ -79,6 +83,8 @@ public class AdminReportsService {
             headers.add(ds + " Time");
             headers.add(ds + " Method");
             headers.add(ds + " Proxy Actor");
+            headers.add(ds + " Logout Time");
+            headers.add(ds + " Logout Status");
         }
         csv.append(CsvExportUtil.toCsvRow(headers));
 
@@ -96,6 +102,8 @@ public class AdminReportsService {
             cells.add(String.valueOf(row.absentDays()));
             cells.add(String.valueOf(row.holidayDays()));
             cells.add(String.valueOf(row.weeklyOffDays()));
+            cells.add(String.valueOf(row.earlyLogoutDays()));
+            cells.add(String.valueOf(row.extendedWorkHoursDays()));
 
             for (MonthlyAttendanceQueryService.GridCell cell : row.cells()) {
                 cells.add(cell.state());
@@ -106,6 +114,8 @@ public class AdminReportsService {
                 } else {
                     cells.add("");
                 }
+                cells.add(cell.checkOutLocalTime() != null ? cell.checkOutLocalTime() : "");
+                cells.add(cell.logoutStatusLabel() != null ? cell.logoutStatusLabel() : "");
             }
             csv.append(CsvExportUtil.toCsvRow(cells));
         }
@@ -138,7 +148,9 @@ public class AdminReportsService {
             int lateDays,
             int absentDays,
             int holidayDays,
-            int weeklyOffDays
+            int weeklyOffDays,
+            int earlyLogoutDays,
+            int extendedWorkHoursDays
     ) {
     }
 

@@ -134,6 +134,10 @@ public class AdminAttendanceCorrectionController {
                 record.getAttendanceStatus(),
                 record.getAttendanceMethod(),
                 record.getNotes(),
+                record.getCheckOutAtUtc(),
+                null,
+                record.getLogoutStatus(),
+                record.getLogoutStatus() != null ? record.getLogoutStatus().getDisplayLabel() : null,
                 java.util.List.of(),
                 java.util.List.of()
         );

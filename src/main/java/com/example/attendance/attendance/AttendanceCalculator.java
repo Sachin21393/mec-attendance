@@ -48,6 +48,7 @@ public class AttendanceCalculator {
                     calendarDay.getShiftStartLocal(),
                     calendarDay.getGracePeriodMinutes(),
                     calendarDay.getAbsenceCutoffLocal(),
+                    calendarDay.getShiftEndLocal(),
                     ZoneId.of(calendarDay.getTimezoneId()),
                     calendarDay.getNote()
             );
@@ -61,6 +62,7 @@ public class AttendanceCalculator {
                 settings.getDefaultShiftStartLocal(),
                 settings.getDefaultGracePeriodMinutes(),
                 settings.getDefaultAbsenceCutoffLocal(),
+                settings.getDefaultShiftEndLocal(),
                 resolveZone(settings),
                 null
         );
@@ -73,6 +75,24 @@ public class AttendanceCalculator {
         return !localCheckIn.toLocalDateTime().isAfter(graceDeadline)
                 ? AttendanceStatus.ON_TIME
                 : AttendanceStatus.LATE;
+    }
+
+    public LogoutStatus evaluateCheckOutStatus(Instant checkOutUtc, EffectiveDayConfig dayConfig) {
+        LocalDateTime localCheckOut = checkOutUtc.atZone(dayConfig.timezone()).toLocalDateTime();
+        LocalDateTime shiftEnd = resolveShiftEndLocalDateTime(dayConfig);
+        return localCheckOut.isBefore(shiftEnd)
+                ? LogoutStatus.EARLY_LOGOUT
+                : LogoutStatus.EXTENDED_WORK_HOURS;
+    }
+
+    public LocalDateTime resolveShiftEndLocalDateTime(EffectiveDayConfig dayConfig) {
+        LocalTime shiftEnd = dayConfig.shiftEndLocal() != null
+                ? dayConfig.shiftEndLocal()
+                : dayConfig.absenceCutoffLocal();
+        LocalDate endDate = shiftEnd.isBefore(dayConfig.shiftStartLocal())
+                ? dayConfig.date().plusDays(1)
+                : dayConfig.date();
+        return LocalDateTime.of(endDate, shiftEnd);
     }
 
     public DerivedGridState deriveDayState(
@@ -113,9 +133,21 @@ public class AttendanceCalculator {
             LocalTime shiftStartLocal,
             int gracePeriodMinutes,
             LocalTime absenceCutoffLocal,
+            LocalTime shiftEndLocal,
             ZoneId timezone,
             String note
     ) {
+        public EffectiveDayConfig(
+                LocalDate date,
+                DayType dayType,
+                LocalTime shiftStartLocal,
+                int gracePeriodMinutes,
+                LocalTime absenceCutoffLocal,
+                ZoneId timezone,
+                String note
+        ) {
+            this(date, dayType, shiftStartLocal, gracePeriodMinutes, absenceCutoffLocal, absenceCutoffLocal, timezone, note);
+        }
     }
 
     public enum DerivedGridState {

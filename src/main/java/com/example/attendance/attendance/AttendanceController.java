@@ -131,19 +131,22 @@ public class AttendanceController {
     ) {
         String key = "kiosk-mark:" + (httpRequest.getRemoteAddr() != null ? httpRequest.getRemoteAddr() : "unknown");
         rateLimiterService.checkLimit(key, 150, Duration.ofMinutes(5));
+        AttendanceActionType action = request.actionType() != null ? request.actionType() : AttendanceActionType.LOGIN;
         String effectiveIdemKey = (request.idempotencyKey() != null && !request.idempotencyKey().isBlank())
                 ? request.idempotencyKey()
                 : headerIdempotencyKey;
         if (effectiveIdemKey == null || effectiveIdemKey.isBlank()) {
             effectiveIdemKey = java.util.UUID.randomUUID().toString();
         }
-        var replay = checkInService.findIdempotentReplay(effectiveIdemKey);
+        var replay = checkInService.findIdempotentReplay(effectiveIdemKey, action);
         if (replay.isPresent()) {
             return replay.get();
         }
         BiometricsVerificationService.KioskVerificationOutcome verified =
                 verificationService.verifyKiosk(request.workerCode(), request.imageBase64());
-        return checkInService.kioskCheckIn(verified.verificationToken(), effectiveIdemKey);
+        return action == AttendanceActionType.LOGOUT
+                ? checkInService.kioskCheckOut(verified.verificationToken(), effectiveIdemKey)
+                : checkInService.kioskCheckIn(verified.verificationToken(), effectiveIdemKey);
     }
 
     public record CheckInRequest(
@@ -161,7 +164,8 @@ public class AttendanceController {
     public record KioskMarkRequest(
             @Size(max = 40) String workerCode,
             @NotBlank(message = "Image is required") String imageBase64,
-            String idempotencyKey
+            String idempotencyKey,
+            AttendanceActionType actionType
     ) {
     }
 }

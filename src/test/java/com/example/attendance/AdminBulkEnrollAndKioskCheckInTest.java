@@ -40,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -311,5 +312,99 @@ class AdminBulkEnrollAndKioskCheckInTest {
 
         mockMvc.perform(get("/api/v1/workers/me").cookie(inviteCookie))
                 .andExpect(status().isUnauthorized());
+
+        // Attempting Logout before Login is rejected with NOT_LOGGED_IN
+        String face902 = Base64.getEncoder().encodeToString("MOCK_FACE_W902".getBytes(StandardCharsets.UTF_8));
+        mockMvc.perform(post("/api/v1/attendance/kiosk/mark")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "imageBase64", face902,
+                                "actionType", "LOGOUT",
+                                "idempotencyKey", UUID.randomUUID().toString()
+                        ))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("NOT_LOGGED_IN"));
+
+        // Configure shiftEndLocal = 23:59 -> W009 logout now evaluates to EARLY_LOGOUT ("Early Logout")
+        mockMvc.perform(put("/api/v1/admin/settings")
+                        .cookie(adminCookie)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "workplaceName", "MEC Team",
+                                "timezoneId", "Asia/Kolkata",
+                                "shiftStartLocal", "00:00",
+                                "gracePeriodMinutes", 15,
+                                "absenceCutoffLocal", "23:59",
+                                "shiftEndLocal", "23:59",
+                                "proxyEnabled", true,
+                                "maxProxyPerActorPerDay", 1
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.shiftEndLocal").value("23:59:00"));
+
+        mockMvc.perform(post("/api/v1/attendance/kiosk/mark")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "imageBase64", w009Face,
+                                "actionType", "LOGOUT",
+                                "idempotencyKey", UUID.randomUUID().toString()
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.actionType").value("LOGOUT"))
+                .andExpect(jsonPath("$.subjectWorkerCode").value("W009"))
+                .andExpect(jsonPath("$.logoutStatus").value("EARLY_LOGOUT"))
+                .andExpect(jsonPath("$.logoutStatusLabel").value("Early Logout"));
+
+        // Second logout on same day rejects with ALREADY_LOGGED_OUT
+        mockMvc.perform(post("/api/v1/attendance/kiosk/mark")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "imageBase64", w009Face,
+                                "actionType", "LOGOUT",
+                                "idempotencyKey", UUID.randomUUID().toString()
+                        ))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ALREADY_LOGGED_OUT"));
+
+        // Configure shiftEndLocal = 00:01 -> W901 logout now evaluates to EXTENDED_WORK_HOURS ("Extended Work Hours")
+        mockMvc.perform(put("/api/v1/admin/settings")
+                        .cookie(adminCookie)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "workplaceName", "MEC Team",
+                                "timezoneId", "Asia/Kolkata",
+                                "shiftStartLocal", "00:00",
+                                "gracePeriodMinutes", 15,
+                                "absenceCutoffLocal", "23:59",
+                                "shiftEndLocal", "00:01",
+                                "proxyEnabled", true,
+                                "maxProxyPerActorPerDay", 1
+                        ))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/attendance/kiosk/mark")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "imageBase64", w901Face,
+                                "actionType", "LOGOUT",
+                                "idempotencyKey", UUID.randomUUID().toString()
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.actionType").value("LOGOUT"))
+                .andExpect(jsonPath("$.subjectWorkerCode").value("W901"))
+                .andExpect(jsonPath("$.logoutStatus").value("EXTENDED_WORK_HOURS"))
+                .andExpect(jsonPath("$.logoutStatusLabel").value("Extended Work Hours"));
+
+        String csvContent = mockMvc.perform(get("/api/v1/admin/reports/attendance.csv?month=" + workplaceToday.toString().substring(0, 7))
+                        .cookie(adminCookie))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(csvContent).contains("Early Logout", "Extended Work Hours");
     }
 }

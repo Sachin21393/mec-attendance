@@ -44,6 +44,19 @@ public class AttendanceRecord {
     @Column(name = "match_confidence")
     private Double matchConfidence;
 
+    @Column(name = "check_out_at_utc")
+    private Instant checkOutAtUtc;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "logout_status", length = 30)
+    private LogoutStatus logoutStatus;
+
+    @Column(name = "logout_idempotency_key", unique = true, length = 128)
+    private String logoutIdempotencyKey;
+
+    @Column(name = "logout_match_confidence")
+    private Double logoutMatchConfidence;
+
     @Column(name = "device_session_id")
     private UUID deviceSessionId;
 
@@ -123,6 +136,38 @@ public class AttendanceRecord {
 
     public Double getMatchConfidence() {
         return matchConfidence;
+    }
+
+    public Instant getCheckOutAtUtc() {
+        return checkOutAtUtc;
+    }
+
+    public void setCheckOutAtUtc(Instant checkOutAtUtc) {
+        this.checkOutAtUtc = checkOutAtUtc;
+    }
+
+    public LogoutStatus getLogoutStatus() {
+        return logoutStatus;
+    }
+
+    public void setLogoutStatus(LogoutStatus logoutStatus) {
+        this.logoutStatus = logoutStatus;
+    }
+
+    public String getLogoutIdempotencyKey() {
+        return logoutIdempotencyKey;
+    }
+
+    public void setLogoutIdempotencyKey(String logoutIdempotencyKey) {
+        this.logoutIdempotencyKey = logoutIdempotencyKey;
+    }
+
+    public Double getLogoutMatchConfidence() {
+        return logoutMatchConfidence;
+    }
+
+    public void setLogoutMatchConfidence(Double logoutMatchConfidence) {
+        this.logoutMatchConfidence = logoutMatchConfidence;
     }
 
     public UUID getDeviceSessionId() {

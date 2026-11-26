@@ -1,4 +1,4 @@
-import { apiFetch, ApiError } from '/shared/api.js';
+import { apiFetch, ApiError, ensureCsrfToken } from '/shared/api.js';
 
 const views = {
   loading: document.getElementById('view-loading'),
@@ -17,6 +17,7 @@ const state = {
   worker: null,
   today: null,
   cameraMode: 'kiosk', // 'kiosk' | 'register'
+  attendanceAction: 'LOGIN', // 'LOGIN' | 'LOGOUT'
   invitationCode: '',
   consentVersion: '',
   fullName: '',
@@ -111,10 +112,10 @@ async function runAutoScanTick() {
     }
 
     let shouldCapture = false;
-    let waitMs = 950;
+    let waitMs = 450;
 
     if ('FaceDetector' in window) {
-      waitMs = 450;
+      waitMs = 300;
       try {
         if (!state.faceDetector) {
           state.faceDetector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 2 });
@@ -133,7 +134,7 @@ async function runAutoScanTick() {
         if (hasUsableFrameBrightness()) {
           shouldCapture = true;
         }
-        waitMs = 950;
+        waitMs = 450;
       }
     } else if (hasUsableFrameBrightness()) {
       shouldCapture = true;
@@ -154,7 +155,7 @@ async function runAutoScanTick() {
   }
 
   if (state.autoScanActive) {
-    state.autoScanTimer = setTimeout(runAutoScanTick, 400);
+    state.autoScanTimer = setTimeout(runAutoScanTick, 200);
   }
 }
 
@@ -167,8 +168,8 @@ function startAutoScan() {
   state.autoScanAttempts = 0;
   state.autoRecognitionMisses = 0;
   setScanning(true);
-  // Give mobile camera autofocus & auto-exposure 850ms to stabilize before capturing frame #1
-  state.autoScanTimer = setTimeout(runAutoScanTick, 850);
+  // Start fast after brief exposure settle so scanning triggers immediately
+  state.autoScanTimer = setTimeout(runAutoScanTick, 250);
 }
 
 async function startCamera() {
@@ -217,7 +218,7 @@ function captureCanvasBase64() {
   if (!state.stream || video.videoWidth === 0) {
     return null;
   }
-  const maxSide = 640;
+  const maxSide = 480;
   const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
   const targetW = Math.max(160, Math.round(video.videoWidth * scale));
   const targetH = Math.max(160, Math.round(video.videoHeight * scale));
@@ -226,7 +227,7 @@ function captureCanvasBase64() {
   canvas.height = targetH;
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, targetW, targetH);
-  return canvas.toDataURL('image/jpeg', 0.82);
+  return canvas.toDataURL('image/jpeg', 0.78);
 }
 
 function setupVoiceInput() {
@@ -357,17 +358,26 @@ async function showKioskHome(registeredMsg = '') {
   try {
     const k = await apiFetch('/api/v1/attendance/kiosk/status');
     document.getElementById('kiosk-workplace-meta').textContent =
-      `${k.workplaceName} (${k.timezoneId}) — Any registered worker can scan their face below.`;
+      `${k.workplaceName} (${k.timezoneId}) — Choose Login or Logout Attendance below.`;
     document.getElementById('kiosk-date').textContent = k.attendanceDate || '-';
+    const loginBtn = document.getElementById('btn-kiosk-login');
+    const logoutBtn = document.getElementById('btn-kiosk-logout');
     if (k.dayType && k.dayType !== 'WORKING') {
-      document.getElementById('kiosk-shift-info').textContent = k.dayType === 'HOLIDAY' ? 'Holiday' : 'Weekly off';
-      document.getElementById('btn-kiosk-mark-attendance').disabled = true;
-      document.getElementById('btn-kiosk-mark-attendance').textContent = 'Non-working day';
+      const label = k.dayType === 'HOLIDAY' ? 'Holiday' : 'Weekly off';
+      document.getElementById('kiosk-shift-info').textContent = label;
+      document.getElementById('kiosk-logout-info').textContent = label;
+      loginBtn.disabled = true;
+      loginBtn.textContent = 'Non-working day';
+      logoutBtn.disabled = true;
     } else {
       document.getElementById('kiosk-shift-info').textContent =
         formatShiftAndGrace(k.shiftStartLocal, k.gracePeriodMinutes);
-      document.getElementById('btn-kiosk-mark-attendance').disabled = false;
-      document.getElementById('btn-kiosk-mark-attendance').textContent = 'Mark your attendance';
+      document.getElementById('kiosk-logout-info').textContent =
+        formatTime12h(k.shiftEndLocal || '18:00');
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Login Attendance';
+      logoutBtn.disabled = false;
+      logoutBtn.textContent = 'Logout Attendance';
     }
   } catch {
     // Non-fatal fallback
@@ -375,10 +385,11 @@ async function showKioskHome(registeredMsg = '') {
   showView('welcome');
 }
 
-function openCameraView(mode) {
+function openCameraView(mode, action = state.attendanceAction || 'LOGIN') {
   state.cameraMode = mode;
+  state.attendanceAction = action;
   state.pendingProxyVerify = null;
-  state.pendingIdempotencyKey = (mode === 'self' || mode === 'proxy' || mode === 'kiosk') ? crypto.randomUUID() : null;
+  state.pendingIdempotencyKey = (mode === 'kiosk') ? crypto.randomUUID() : null;
 
   const heading = document.getElementById('camera-heading');
   const guidance = document.getElementById('camera-guidance');
@@ -391,13 +402,8 @@ function openCameraView(mode) {
     guidance.textContent = 'Place your face inside the frame in good lighting. Keep only one face in frame.';
     actionBtn.textContent = 'Capture & Complete Registration';
     actionBtn.className = 'btn btn-primary btn-block';
-  } else if (mode === 'proxy') {
-    heading.textContent = 'Ask the worker to face the camera';
-    guidance.textContent = 'The other worker must be physically present for face verification.';
-    actionBtn.textContent = 'Verify Worker Face';
-    actionBtn.className = 'btn btn-primary btn-block';
   } else {
-    heading.textContent = 'Place your face inside the frame';
+    heading.textContent = action === 'LOGOUT' ? 'Logout Attendance — Scan Face' : 'Login Attendance — Scan Face';
     guidance.textContent = 'Look straight into the oval — scanning automatically...';
     actionBtn.textContent = 'Scan Now';
     actionBtn.className = 'btn btn-secondary btn-block';
@@ -409,24 +415,53 @@ function openCameraView(mode) {
 
 function showAttendanceSuccess(data) {
   stopCamera();
+  const isLogout = data.actionType === 'LOGOUT' || state.attendanceAction === 'LOGOUT';
   const icon = document.getElementById('result-icon-wrap');
   icon.className = 'result-icon result-icon-success';
   icon.innerHTML = '&#10003;';
-  document.getElementById('result-title').textContent = 'Attendance marked successfully';
-  document.getElementById('result-subtitle').textContent = state.biometricsConfig?.mockMode
-    ? `Recorded in mock-biometrics mode for ${data.subjectWorkerName}.`
-    : `Recorded for ${data.subjectWorkerName} (${data.subjectWorkerCode}).`;
+  document.getElementById('result-title').textContent = isLogout
+    ? 'Logout attendance marked'
+    : 'Login attendance marked';
+
+  const loginRow = document.getElementById('result-login-row');
+  const loginTimeEl = document.getElementById('result-login-time');
+  const timeLabel = document.getElementById('result-time-label');
+  const badge = document.getElementById('result-status-badge');
+
   document.getElementById('result-details').hidden = false;
   document.getElementById('result-worker-name').textContent = `${data.subjectWorkerName} (${data.subjectWorkerCode})`;
   document.getElementById('result-date').textContent = data.attendanceDate;
-  document.getElementById('result-time').textContent = `${data.checkInLocalTime} (${data.timezoneId})`;
-  const badge = document.getElementById('result-status-badge');
-  badge.className = `status-badge ${data.attendanceStatus === 'LATE' ? 'status-late' : 'status-ontime'}`;
-  badge.textContent = data.attendanceStatus === 'LATE' ? 'Late' : 'On time';
-  document.getElementById('result-method').textContent = data.attendanceMethod;
+
+  if (isLogout) {
+    const logoutLabel = data.logoutStatusLabel || (data.logoutStatus === 'EARLY_LOGOUT' ? 'Early Logout' : 'Extended Work Hours');
+    const isEarly = data.logoutStatus === 'EARLY_LOGOUT';
+    document.getElementById('result-subtitle').textContent =
+      `${data.subjectWorkerName} (${data.subjectWorkerCode}) — ${logoutLabel}.`;
+    loginRow.hidden = false;
+    loginTimeEl.textContent = `${data.checkInLocalTime} (${data.timezoneId})`;
+    timeLabel.textContent = 'Logout time';
+    document.getElementById('result-time').textContent = `${data.checkOutLocalTime} (${data.timezoneId})`;
+    badge.className = `status-badge ${isEarly ? 'status-late' : 'status-ontime'}`;
+    badge.textContent = logoutLabel;
+    document.getElementById('result-method').textContent = 'Logout Attendance';
+  } else {
+    document.getElementById('result-subtitle').textContent = state.biometricsConfig?.mockMode
+      ? `Recorded in mock-biometrics mode for ${data.subjectWorkerName}.`
+      : `Recorded for ${data.subjectWorkerName} (${data.subjectWorkerCode}).`;
+    loginRow.hidden = true;
+    timeLabel.textContent = 'Login time';
+    document.getElementById('result-time').textContent = `${data.checkInLocalTime} (${data.timezoneId})`;
+    badge.className = `status-badge ${data.attendanceStatus === 'LATE' ? 'status-late' : 'status-ontime'}`;
+    badge.textContent = data.attendanceStatus === 'LATE' ? 'Late' : 'On time';
+    document.getElementById('result-method').textContent = 'Login Attendance';
+  }
+
   document.getElementById('btn-result-retry').hidden = true;
   const nextBtn = document.getElementById('btn-result-next-worker');
-  if (nextBtn) nextBtn.hidden = false;
+  if (nextBtn) {
+    nextBtn.hidden = false;
+    nextBtn.textContent = isLogout ? 'Scan Next Worker (Logout)' : 'Scan Next Worker (Login)';
+  }
   showView('result');
 }
 
@@ -489,13 +524,16 @@ async function handleCameraCapture(imageBase64, opts = {}) {
         `Registered ${result.fullName || state.fullName} (${result.workerCode})! You can now mark attendance below.`
       );
     } else {
-      document.getElementById('camera-guidance').textContent = 'Recognizing face & marking attendance...';
+      document.getElementById('camera-guidance').textContent = state.attendanceAction === 'LOGOUT'
+        ? 'Recognizing face & recording Logout...'
+        : 'Recognizing face & recording Login...';
       const checkIn = await apiFetch('/api/v1/attendance/kiosk/mark', {
         method: 'POST',
         headers: { 'Idempotency-Key': state.pendingIdempotencyKey },
         body: {
           imageBase64,
-          idempotencyKey: state.pendingIdempotencyKey
+          idempotencyKey: state.pendingIdempotencyKey,
+          actionType: state.attendanceAction
         }
       });
       stopAutoScan();
@@ -505,7 +543,7 @@ async function handleCameraCapture(imageBase64, opts = {}) {
     if (state.cameraMode === 'register') {
       setScanning(false);
       setBanner('camera-error', err.message || 'Registration failed. Please try again.');
-    } else if (err instanceof ApiError && err.code === 'ALREADY_MARKED') {
+    } else if (err instanceof ApiError && (err.code === 'ALREADY_MARKED' || err.code === 'ALREADY_LOGGED_OUT' || err.code === 'NOT_LOGGED_IN')) {
       stopAutoScan();
       setScanning(false);
       showAttendanceFailure(err.message, false, true);
@@ -627,6 +665,7 @@ async function init() {
 
   const [bioCfg] = await Promise.all([
     apiFetch('/api/v1/biometrics/config').catch(() => null),
+    ensureCsrfToken().catch(() => null),
     showKioskHome()
   ]);
   if (bioCfg) {
@@ -637,12 +676,20 @@ async function init() {
   }
 }
 
-document.getElementById('btn-kiosk-mark-attendance')?.addEventListener('click', () => {
+document.getElementById('btn-kiosk-login')?.addEventListener('click', () => {
   if (!navigator.onLine) {
     showAttendanceFailure("You're offline. Your attendance has not been recorded.", true);
     return;
   }
-  openCameraView('kiosk');
+  openCameraView('kiosk', 'LOGIN');
+});
+
+document.getElementById('btn-kiosk-logout')?.addEventListener('click', () => {
+  if (!navigator.onLine) {
+    showAttendanceFailure("You're offline. Your attendance has not been recorded.", true);
+    return;
+  }
+  openCameraView('kiosk', 'LOGOUT');
 });
 
 document.getElementById('btn-start-register').addEventListener('click', () => {
@@ -752,8 +799,8 @@ document.getElementById('btn-capture-action').addEventListener('click', async ()
 document.getElementById('btn-proxy-confirm-submit').addEventListener('click', submitProxyConfirmation);
 document.getElementById('btn-proxy-confirm-cancel').addEventListener('click', () => showKioskHome());
 
-document.getElementById('btn-result-next-worker')?.addEventListener('click', () => openCameraView('kiosk'));
-document.getElementById('btn-result-retry').addEventListener('click', () => openCameraView(state.cameraMode));
+document.getElementById('btn-result-next-worker')?.addEventListener('click', () => openCameraView('kiosk', state.attendanceAction));
+document.getElementById('btn-result-retry').addEventListener('click', () => openCameraView(state.cameraMode, state.attendanceAction));
 document.getElementById('btn-result-done').addEventListener('click', () => showKioskHome());
 
 document.getElementById('btn-switch-worker').addEventListener('click', async () => {

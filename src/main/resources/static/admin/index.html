@@ -126,6 +126,8 @@
               <span class="legend-item"><span class="cell-pill cell-HOLIDAY">H</span> Holiday</span>
               <span class="legend-item"><span class="cell-pill cell-WEEKLY_OFF">W</span> Weekly off</span>
               <span class="legend-item"><span class="cell-pill cell-NOT_DUE">&middot;</span> Not due</span>
+              <span class="legend-item"><span class="proxy-dot" style="background:#d97706;">E</span> Early Logout</span>
+              <span class="legend-item"><span class="proxy-dot" style="background:#059669;">+</span> Extended Work Hours</span>
               <span class="legend-item"><span class="proxy-dot">P</span> Proxy check-in</span>
             </div>
 
@@ -304,6 +306,8 @@
                     <th>Late</th>
                     <th>Absent</th>
                     <th>Holidays / Off</th>
+                    <th>Early Logout</th>
+                    <th>Extended Hours</th>
                   </tr>
                 </thead>
                 <tbody id="reports-tbody"></tbody>
@@ -375,6 +379,10 @@
                 <div class="field">
                   <label for="set-absence-cutoff">Absence cutoff time</label>
                   <input id="set-absence-cutoff" class="input" type="time" required>
+                </div>
+                <div class="field">
+                  <label for="set-shift-end">Logout / Shift end time</label>
+                  <input id="set-shift-end" class="input" type="time" required>
                 </div>
                 <div class="field">
                   <label for="set-proxy-cap">Proxy attendance limit (per actor/day)</label>

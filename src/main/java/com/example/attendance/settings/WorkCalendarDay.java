@@ -35,6 +35,9 @@ public class WorkCalendarDay {
     @Column(name = "absence_cutoff_local", nullable = false)
     private LocalTime absenceCutoffLocal;
 
+    @Column(name = "shift_end_local", nullable = false)
+    private LocalTime shiftEndLocal = LocalTime.of(18, 0);
+
     @Column(name = "timezone_id", nullable = false, length = 64)
     private String timezoneId;
 
@@ -56,12 +59,20 @@ public class WorkCalendarDay {
     public WorkCalendarDay(UUID id, LocalDate calendarDate, DayType dayType, LocalTime shiftStartLocal,
                            int gracePeriodMinutes, LocalTime absenceCutoffLocal, String timezoneId,
                            String note, UUID createdByAdminId, Instant now) {
+        this(id, calendarDate, dayType, shiftStartLocal, gracePeriodMinutes, absenceCutoffLocal,
+                LocalTime.of(18, 0), timezoneId, note, createdByAdminId, now);
+    }
+
+    public WorkCalendarDay(UUID id, LocalDate calendarDate, DayType dayType, LocalTime shiftStartLocal,
+                           int gracePeriodMinutes, LocalTime absenceCutoffLocal, LocalTime shiftEndLocal,
+                           String timezoneId, String note, UUID createdByAdminId, Instant now) {
         this.id = id;
         this.calendarDate = calendarDate;
         this.dayType = dayType;
         this.shiftStartLocal = shiftStartLocal;
         this.gracePeriodMinutes = gracePeriodMinutes;
         this.absenceCutoffLocal = absenceCutoffLocal;
+        this.shiftEndLocal = shiftEndLocal != null ? shiftEndLocal : LocalTime.of(18, 0);
         this.timezoneId = timezoneId;
         this.note = note;
         this.createdByAdminId = createdByAdminId;
@@ -107,6 +118,14 @@ public class WorkCalendarDay {
 
     public void setAbsenceCutoffLocal(LocalTime absenceCutoffLocal) {
         this.absenceCutoffLocal = absenceCutoffLocal;
+    }
+
+    public LocalTime getShiftEndLocal() {
+        return shiftEndLocal;
+    }
+
+    public void setShiftEndLocal(LocalTime shiftEndLocal) {
+        this.shiftEndLocal = shiftEndLocal;
     }
 
     public String getTimezoneId() {

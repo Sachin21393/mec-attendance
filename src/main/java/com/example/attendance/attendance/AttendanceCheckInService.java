@@ -155,7 +155,8 @@ public class AttendanceCheckInService {
                 dayConfig.timezone().getId(),
                 dayConfig.dayType(),
                 dayConfig.shiftStartLocal().toString(),
-                dayConfig.gracePeriodMinutes()
+                dayConfig.gracePeriodMinutes(),
+                dayConfig.shiftEndLocal() != null ? dayConfig.shiftEndLocal().toString() : dayConfig.absenceCutoffLocal().toString()
         );
     }
 
@@ -184,14 +185,23 @@ public class AttendanceCheckInService {
 
     @Transactional(readOnly = true)
     public Optional<CheckInResponse> findIdempotentReplay(String idempotencyKey) {
+        return findIdempotentReplay(idempotencyKey, AttendanceActionType.LOGIN);
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<CheckInResponse> findIdempotentReplay(String idempotencyKey, AttendanceActionType actionType) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             return Optional.empty();
         }
-        return attendanceRepository.findByIdempotencyKey(idempotencyKey.trim())
-                .map(existing -> {
-                    UUID actorId = existing.getActorWorkerId() != null ? existing.getActorWorkerId() : existing.getSubjectWorkerId();
-                    return buildReplayResponse(existing, actorId);
-                });
+        String key = idempotencyKey.trim();
+        AttendanceActionType effective = actionType != null ? actionType : AttendanceActionType.LOGIN;
+        Optional<AttendanceRecord> match = effective == AttendanceActionType.LOGOUT
+                ? attendanceRepository.findByLogoutIdempotencyKey(key)
+                : attendanceRepository.findByIdempotencyKey(key);
+        return match.map(existing -> {
+            UUID actorId = existing.getActorWorkerId() != null ? existing.getActorWorkerId() : existing.getSubjectWorkerId();
+            return buildReplayResponse(existing, actorId, effective);
+        });
     }
 
     /**
@@ -206,7 +216,7 @@ public class AttendanceCheckInService {
         if (replayOpt.isPresent()) {
             AttendanceRecord existing = replayOpt.get();
             UUID actorId = existing.getActorWorkerId() != null ? existing.getActorWorkerId() : existing.getSubjectWorkerId();
-            return buildReplayResponse(existing, actorId);
+            return buildReplayResponse(existing, actorId, AttendanceActionType.LOGIN);
         }
 
         BiometricVerificationToken bioToken = validateTokenForUse(rawVerificationToken);
@@ -214,6 +224,110 @@ public class AttendanceCheckInService {
             throw new ForbiddenException("VERIFICATION_MODE_MISMATCH", "Invalid verification token mode for direct attendance.");
         }
         return executeCheckIn(bioToken.getSubjectWorkerId(), null, bioToken, cleanIdemKey);
+    }
+
+    /**
+     * Completes a direct kiosk Logout (check-out) for a worker who has already logged in today,
+     * evaluating Early Logout vs Extended Work Hours against configured shift end / logout time.
+     */
+    @Transactional
+    public CheckInResponse kioskCheckOut(String rawVerificationToken, String idempotencyKey) {
+        String cleanIdemKey = requireIdempotencyKey(idempotencyKey);
+
+        Optional<AttendanceRecord> replayOpt = attendanceRepository.findByLogoutIdempotencyKey(cleanIdemKey);
+        if (replayOpt.isPresent()) {
+            AttendanceRecord existing = replayOpt.get();
+            UUID actorId = existing.getActorWorkerId() != null ? existing.getActorWorkerId() : existing.getSubjectWorkerId();
+            return buildReplayResponse(existing, actorId, AttendanceActionType.LOGOUT);
+        }
+
+        BiometricVerificationToken bioToken = validateTokenForUse(rawVerificationToken);
+        if (!"KIOSK".equalsIgnoreCase(bioToken.getVerificationMode())) {
+            throw new ForbiddenException("VERIFICATION_MODE_MISMATCH", "Invalid verification token mode for direct attendance.");
+        }
+
+        Instant now = clock.instant();
+        Worker subject = workerRepository.findById(bioToken.getSubjectWorkerId())
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker not found."));
+        if (subject.getStatus() != WorkerStatus.REGISTERED) {
+            throw new ForbiddenException("WORKER_NOT_ACTIVE", "Worker account is not active.");
+        }
+
+        AttendanceSettings settings = loadSettings();
+        LocalDate attendanceDate = calculator.resolveAttendanceDate(now, settings);
+        WorkCalendarDay calDay = calendarRepository.findByCalendarDate(attendanceDate).orElse(null);
+        AttendanceCalculator.EffectiveDayConfig dayConfig = calculator.resolveDayConfig(attendanceDate, calDay, settings);
+
+        if (dayConfig.dayType() != DayType.WORKING) {
+            throw new ConflictException(
+                    "NON_WORKING_DAY",
+                    "Today (" + attendanceDate + ") is configured as " + dayConfig.dayType().name().replace('_', ' ').toLowerCase() + "."
+            );
+        }
+
+        AttendanceRecord record = attendanceRepository.findBySubjectWorkerIdAndAttendanceDate(subject.getId(), attendanceDate)
+                .orElseThrow(() -> new ConflictException(
+                        "NOT_LOGGED_IN",
+                        subject.getFullName() + " (" + subject.getWorkerCode()
+                                + ") has not marked Login Attendance today. Please mark Login Attendance first."
+                ));
+
+        if (record.getCheckOutAtUtc() != null) {
+            String timeStr = calculator.formatLocalTime(record.getCheckOutAtUtc(), dayConfig.timezone());
+            throw new ConflictException(
+                    "ALREADY_LOGGED_OUT",
+                    subject.getFullName() + " (" + subject.getWorkerCode() + ") has already marked Logout Attendance today at " + timeStr
+            );
+        }
+
+        LogoutStatus logoutStatus = calculator.evaluateCheckOutStatus(now, dayConfig);
+        bioToken.setConsumedAtUtc(now);
+        verificationTokenRepository.save(bioToken);
+
+        record.setCheckOutAtUtc(now);
+        record.setLogoutStatus(logoutStatus);
+        record.setLogoutIdempotencyKey(cleanIdemKey);
+        record.setLogoutMatchConfidence(bioToken.getMatchConfidence());
+        record.setUpdatedAt(now);
+        attendanceRepository.saveAndFlush(record);
+
+        auditService.record(
+                "ATTENDANCE_LOGOUT_RECORDED",
+                AuditActorType.WORKER,
+                subject.getId(),
+                subject.getId(),
+                Map.of(
+                        "attendanceDate", attendanceDate.toString(),
+                        "logoutStatus", logoutStatus.name(),
+                        "logoutLabel", logoutStatus.getDisplayLabel(),
+                        "workerCode", subject.getWorkerCode(),
+                        "shiftEndLocal", dayConfig.shiftEndLocal().toString()
+                )
+        );
+
+        String checkInLocal = calculator.formatLocalTime(record.getCheckInAtUtc(), dayConfig.timezone());
+        String checkOutLocal = calculator.formatLocalTime(now, dayConfig.timezone());
+        return new CheckInResponse(
+                record.getId(),
+                subject.getId(),
+                subject.getWorkerCode(),
+                subject.getFullName(),
+                subject.getId(),
+                subject.getFullName(),
+                attendanceDate,
+                record.getCheckInAtUtc(),
+                checkInLocal,
+                dayConfig.timezone().getId(),
+                record.getAttendanceStatus(),
+                record.getAttendanceMethod(),
+                false,
+                AttendanceActionType.LOGOUT.name(),
+                now,
+                checkOutLocal,
+                logoutStatus,
+                logoutStatus.getDisplayLabel(),
+                dayConfig.shiftEndLocal().toString()
+        );
     }
 
     private static String requireIdempotencyKey(String idempotencyKey) {
@@ -224,8 +338,14 @@ public class AttendanceCheckInService {
     }
 
     private CheckInResponse buildReplayResponse(AttendanceRecord existing, UUID actorWorkerId) {
+        return buildReplayResponse(existing, actorWorkerId, AttendanceActionType.LOGIN);
+    }
+
+    private CheckInResponse buildReplayResponse(AttendanceRecord existing, UUID actorWorkerId, AttendanceActionType actionType) {
         AttendanceSettings settings = loadSettings();
         ZoneId zone = calculator.resolveZone(settings);
+        WorkCalendarDay calDay = calendarRepository.findByCalendarDate(existing.getAttendanceDate()).orElse(null);
+        AttendanceCalculator.EffectiveDayConfig dayConfig = calculator.resolveDayConfig(existing.getAttendanceDate(), calDay, settings);
         Worker subject = workerRepository.findById(existing.getSubjectWorkerId()).orElseThrow();
         Worker actor = workerRepository.findById(actorWorkerId).orElse(subject);
         return new CheckInResponse(
@@ -241,7 +361,13 @@ public class AttendanceCheckInService {
                 zone.getId(),
                 existing.getAttendanceStatus(),
                 existing.getAttendanceMethod(),
-                true
+                true,
+                actionType.name(),
+                existing.getCheckOutAtUtc(),
+                existing.getCheckOutAtUtc() != null ? calculator.formatLocalTime(existing.getCheckOutAtUtc(), zone) : null,
+                existing.getLogoutStatus(),
+                existing.getLogoutStatus() != null ? existing.getLogoutStatus().getDisplayLabel() : null,
+                dayConfig.shiftEndLocal().toString()
         );
     }
 
@@ -401,7 +527,13 @@ public class AttendanceCheckInService {
                 dayConfig.timezone().getId(),
                 status,
                 method,
-                false
+                false,
+                AttendanceActionType.LOGIN.name(),
+                null,
+                null,
+                null,
+                null,
+                dayConfig.shiftEndLocal().toString()
         );
     }
 
@@ -453,7 +585,13 @@ public class AttendanceCheckInService {
             String timezoneId,
             AttendanceStatus attendanceStatus,
             AttendanceMethod attendanceMethod,
-            boolean idempotentReplay
+            boolean idempotentReplay,
+            String actionType,
+            Instant checkOutAtUtc,
+            String checkOutLocalTime,
+            LogoutStatus logoutStatus,
+            String logoutStatusLabel,
+            String shiftEndLocal
     ) {
     }
 
@@ -463,7 +601,8 @@ public class AttendanceCheckInService {
             String timezoneId,
             DayType dayType,
             String shiftStartLocal,
-            int gracePeriodMinutes
+            int gracePeriodMinutes,
+            String shiftEndLocal
     ) {
     }
 }

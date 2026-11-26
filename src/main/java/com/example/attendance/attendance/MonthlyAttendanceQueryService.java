@@ -261,6 +261,10 @@ public class MonthlyAttendanceQueryService {
                 rec.getAttendanceStatus(),
                 rec.getAttendanceMethod(),
                 rec.getNotes(),
+                rec.getCheckOutAtUtc(),
+                rec.getCheckOutAtUtc() != null ? calculator.formatLocalTime(rec.getCheckOutAtUtc(), zone) : null,
+                rec.getLogoutStatus(),
+                rec.getLogoutStatus() != null ? rec.getLogoutStatus().getDisplayLabel() : null,
                 corrections.stream().map(c -> new CorrectionSummary(
                         c.getId(), c.getPreviousStatus(), c.getNewStatus(), c.getReason(), c.getCreatedAt()
                 )).toList(),
@@ -286,11 +290,13 @@ public class MonthlyAttendanceQueryService {
         int absentDays = 0;
         int holidayDays = 0;
         int weeklyOffDays = 0;
+        int earlyLogoutDays = 0;
+        int extendedWorkHoursDays = 0;
 
         for (AttendanceCalculator.EffectiveDayConfig dc : dayConfigs) {
             AttendanceRecord rec = recordsMatrix.getOrDefault(dc.date(), Map.of()).get(worker.getId());
             if (!isEmployedOn(worker, dc.date())) {
-                cells.add(new GridCell(dc.date(), "NOT_EMPLOYED", null, null, null, null, null));
+                cells.add(new GridCell(dc.date(), "NOT_EMPLOYED", null, null, null, null, null, null, null, null));
                 continue;
             }
             if (dc.dayType() == DayType.HOLIDAY) {
@@ -309,6 +315,11 @@ public class MonthlyAttendanceQueryService {
                 } else if (state == AttendanceCalculator.DerivedGridState.LATE) {
                     lateDays++;
                 }
+                if (rec.getLogoutStatus() == LogoutStatus.EARLY_LOGOUT) {
+                    earlyLogoutDays++;
+                } else if (rec.getLogoutStatus() == LogoutStatus.EXTENDED_WORK_HOURS) {
+                    extendedWorkHoursDays++;
+                }
             } else if (state == AttendanceCalculator.DerivedGridState.ABSENT) {
                 absentDays++;
             }
@@ -321,7 +332,10 @@ public class MonthlyAttendanceQueryService {
                     rec != null ? calculator.formatLocalTime(rec.getCheckInAtUtc(), zone) : null,
                     rec != null ? rec.getAttendanceMethod() : null,
                     actor != null ? actor.getWorkerCode() : null,
-                    actor != null ? actor.getFullName() : null
+                    actor != null ? actor.getFullName() : null,
+                    (rec != null && rec.getCheckOutAtUtc() != null) ? calculator.formatLocalTime(rec.getCheckOutAtUtc(), zone) : null,
+                    rec != null ? rec.getLogoutStatus() : null,
+                    (rec != null && rec.getLogoutStatus() != null) ? rec.getLogoutStatus().getDisplayLabel() : null
             ));
         }
 
@@ -338,6 +352,8 @@ public class MonthlyAttendanceQueryService {
                 absentDays,
                 holidayDays,
                 weeklyOffDays,
+                earlyLogoutDays,
+                extendedWorkHoursDays,
                 cells
         );
     }
@@ -408,7 +424,10 @@ public class MonthlyAttendanceQueryService {
             String checkInLocalTime,
             AttendanceMethod method,
             String actorWorkerCode,
-            String actorWorkerName
+            String actorWorkerName,
+            String checkOutLocalTime,
+            LogoutStatus logoutStatus,
+            String logoutStatusLabel
     ) {
     }
 
@@ -425,6 +444,8 @@ public class MonthlyAttendanceQueryService {
             int absentDays,
             int holidayDays,
             int weeklyOffDays,
+            int earlyLogoutDays,
+            int extendedWorkHoursDays,
             List<GridCell> cells
     ) {
     }
@@ -460,6 +481,10 @@ public class MonthlyAttendanceQueryService {
             AttendanceStatus attendanceStatus,
             AttendanceMethod attendanceMethod,
             String notes,
+            Instant checkOutAtUtc,
+            String checkOutLocalTime,
+            LogoutStatus logoutStatus,
+            String logoutStatusLabel,
             List<CorrectionSummary> corrections,
             List<AuditSnippet> recentAudits
     ) {

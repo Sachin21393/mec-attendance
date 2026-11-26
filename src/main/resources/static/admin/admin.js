@@ -198,11 +198,26 @@ function renderGrid(grid) {
       btn.className = `cell-btn cell-${cell.state}`;
       btn.textContent = symbolForState(cell.state);
       const timePart = cell.checkInLocalTime ? ` at ${cell.checkInLocalTime}` : '';
+      const logoutPart = cell.checkOutLocalTime
+        ? ` · Logout ${cell.checkOutLocalTime} (${cell.logoutStatusLabel || ''})`
+        : '';
       const proxyPart = cell.method === 'PROXY' && cell.actorWorkerName ? ` (proxy by ${cell.actorWorkerName})` : '';
-      btn.setAttribute('aria-label', `${row.fullName}, ${cell.date}: ${labelForState(cell.state)}${timePart}${proxyPart}`);
-      btn.title = `${cell.date}: ${labelForState(cell.state)}${timePart}${proxyPart}`;
+      btn.setAttribute('aria-label', `${row.fullName}, ${cell.date}: ${labelForState(cell.state)}${timePart}${logoutPart}${proxyPart}`);
+      btn.title = `${cell.date}: ${labelForState(cell.state)}${timePart}${logoutPart}${proxyPart}`;
 
-      if (cell.method === 'PROXY') {
+      if (cell.logoutStatus === 'EARLY_LOGOUT') {
+        const dot = document.createElement('span');
+        dot.className = 'proxy-dot';
+        dot.style.background = '#d97706';
+        dot.textContent = 'E';
+        btn.appendChild(dot);
+      } else if (cell.logoutStatus === 'EXTENDED_WORK_HOURS') {
+        const dot = document.createElement('span');
+        dot.className = 'proxy-dot';
+        dot.style.background = '#059669';
+        dot.textContent = '+';
+        btn.appendChild(dot);
+      } else if (cell.method === 'PROXY') {
         const dot = document.createElement('span');
         dot.className = 'proxy-dot';
         dot.textContent = 'P';
@@ -236,8 +251,10 @@ async function openDetailDrawer(recordId) {
       <div class="detail-kv"><span>Worker</span><strong>${escapeHtml(d.subjectWorkerName)} (${escapeHtml(d.subjectWorkerCode)})</strong></div>
       <div class="detail-kv"><span>Date</span><strong>${escapeHtml(d.attendanceDate)}</strong></div>
       <div class="detail-kv"><span>Local Check-in</span><strong>${escapeHtml(d.checkInLocalTime)} (${escapeHtml(d.timezoneId)})</strong></div>
-      <div class="detail-kv"><span>UTC Timestamp</span><span>${escapeHtml(d.checkInAtUtc)}</span></div>
       <div class="detail-kv"><span>Status</span><strong>${escapeHtml(d.attendanceStatus)}</strong></div>
+      <div class="detail-kv"><span>Logout Time</span><strong>${d.checkOutLocalTime ? `${escapeHtml(d.checkOutLocalTime)} (${escapeHtml(d.timezoneId)})` : 'Not logged out yet'}</strong></div>
+      ${d.logoutStatusLabel ? `<div class="detail-kv"><span>Logout Status</span><strong style="color:${d.logoutStatus === 'EARLY_LOGOUT' ? '#b45309' : '#047857'};">${escapeHtml(d.logoutStatusLabel)}</strong></div>` : ''}
+      <div class="detail-kv"><span>UTC Timestamp</span><span>${escapeHtml(d.checkInAtUtc)}</span></div>
       <div class="detail-kv"><span>Method</span><strong>${escapeHtml(d.attendanceMethod)}</strong></div>
       <div class="detail-kv"><span>Recorded By</span><strong>${d.actorWorkerName ? `${escapeHtml(d.actorWorkerName)}${d.actorWorkerCode ? ' (' + escapeHtml(d.actorWorkerCode) + ')' : ''}` : 'Administrator (Manual)'}</strong></div>
       ${d.notes ? `<div class="detail-kv"><span>Notes</span><span>${escapeHtml(d.notes)}</span></div>` : ''}
@@ -620,7 +637,7 @@ async function loadReportsPreview() {
 
     tbody.innerHTML = '';
     if (preview.workers.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="9" class="helper-text">No matching workers found.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" class="helper-text">No matching workers found.</td></tr>';
       return;
     }
     preview.workers.forEach((w) => {
@@ -635,6 +652,8 @@ async function loadReportsPreview() {
         <td>${w.lateDays}</td>
         <td>${w.absentDays}</td>
         <td>${w.holidayDays + w.weeklyOffDays}</td>
+        <td>${w.earlyLogoutDays ?? 0}</td>
+        <td>${w.extendedWorkHoursDays ?? 0}</td>
       `;
       tbody.appendChild(tr);
     });
@@ -690,6 +709,7 @@ async function loadCalendarAndSettings() {
     document.getElementById('set-shift-start').value = state.shiftStartLocal;
     document.getElementById('set-grace-minutes').value = s.gracePeriodMinutes;
     document.getElementById('set-absence-cutoff').value = s.absenceCutoffLocal.slice(0, 5);
+    document.getElementById('set-shift-end').value = (s.shiftEndLocal || s.absenceCutoffLocal).slice(0, 5);
     document.getElementById('set-proxy-cap').value = s.maxProxyPerActorPerDay;
     document.getElementById('set-proxy-enabled').checked = !!s.proxyEnabled;
 
@@ -903,6 +923,7 @@ document.getElementById('form-settings').addEventListener('submit', async (e) =>
     shiftStartLocal: document.getElementById('set-shift-start').value,
     gracePeriodMinutes: Number(document.getElementById('set-grace-minutes').value),
     absenceCutoffLocal: document.getElementById('set-absence-cutoff').value,
+    shiftEndLocal: document.getElementById('set-shift-end').value,
     proxyEnabled: document.getElementById('set-proxy-enabled').checked,
     maxProxyPerActorPerDay: Number(document.getElementById('set-proxy-cap').value),
     proxyCapCountsSuccessfulOnly: true
