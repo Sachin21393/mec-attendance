@@ -49,8 +49,8 @@ export MALLOC_MMAP_THRESHOLD_=131072
 
 # Bounded JVM + SerialGC heap/metaspace/direct limits leave native headroom for ONNX models inside Render's 512 MiB cap
 exec java \
-  -Xms80m \
-  -Xmx160m \
+  -Xms64m \
+  -Xmx136m \
   -XX:MaxMetaspaceSize=136m \
   -XX:ReservedCodeCacheSize=40m \
   -XX:MaxDirectMemorySize=24m \

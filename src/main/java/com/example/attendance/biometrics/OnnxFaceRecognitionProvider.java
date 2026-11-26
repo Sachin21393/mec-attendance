@@ -123,9 +123,14 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
 
     @Override
     public ExtractionResult extractEmbedding(byte[] imageBytes) {
+        // Run decode + detection + recognition single-flight so parallel requests never stack image/native buffers
+        return runOnSingleOnnxThread(() -> extractEmbeddingSerial(imageBytes));
+    }
+
+    private ExtractionResult extractEmbeddingSerial(byte[] imageBytes) {
         BufferedImage decoded = capWorkingResolution(imageValidator.decodeAndValidateImage(imageBytes));
         LetterboxImage lb = letterbox(decoded, YUNET_INPUT_SIZE);
-        List<DetectedFace> faces = runOnSingleOnnxThread(() -> detectFaces(lb.image()));
+        List<DetectedFace> faces = detectFaces(lb.image());
 
         if (faces.isEmpty()) {
             throw new ValidationException("NO_FACE_DETECTED", "No face detected. Place your face inside the frame.");
@@ -162,7 +167,7 @@ public class OnnxFaceRecognitionProvider implements FaceRecognitionProvider {
         }
 
         BufferedImage aligned112 = alignFace112(decoded, origFace);
-        float[] embedding = runOnSingleOnnxThread(() -> runSface(aligned112));
+        float[] embedding = runSface(aligned112);
         return new ExtractionResult(embedding, 1, origFace.score, true, "passive-quality-only-no-pad");
     }
 
