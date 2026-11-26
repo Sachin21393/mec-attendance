@@ -71,7 +71,7 @@ public class AdminBootstrapRunner implements ApplicationRunner {
         Instant now = Instant.now();
         AttendanceSettings settings = new AttendanceSettings(
                 UUID.randomUUID(),
-                "MECATT Team",
+                "MEC Team",
                 properties.getDefaults().getTimezone(),
                 LocalTime.of(9, 0),
                 15,

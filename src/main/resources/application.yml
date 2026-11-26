@@ -1,6 +1,6 @@
 spring:
   application:
-    name: workforce-attendance
+    name: mec-team-attendance
   jpa:
     open-in-view: false
     hibernate:
