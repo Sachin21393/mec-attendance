@@ -66,6 +66,8 @@ class PwaAndSecurityHeadersTest {
         mockMvc.perform(get("/worker")).andExpect(status().isOk());
         mockMvc.perform(get("/worker/")).andExpect(status().isOk());
         mockMvc.perform(get("/worker/index.html")).andExpect(status().isOk());
+        mockMvc.perform(get("/employee")).andExpect(status().isOk());
+        mockMvc.perform(get("/employee/")).andExpect(status().isOk());
         mockMvc.perform(get("/admin")).andExpect(status().isOk());
         mockMvc.perform(get("/admin/")).andExpect(status().isOk());
         mockMvc.perform(get("/admin/index.html")).andExpect(status().isOk());
@@ -90,6 +92,7 @@ class PwaAndSecurityHeadersTest {
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"))
                 .andExpect(header().string("Referrer-Policy", "no-referrer"))
                 .andExpect(header().string("Permissions-Policy", containsString("camera=(self)")))
+                .andExpect(header().string("Permissions-Policy", containsString("geolocation=(self)")))
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, containsString("no-store")));
     }
 }

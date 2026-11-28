@@ -44,7 +44,7 @@ public class AttendanceController {
     @GetMapping("/today")
     public AttendanceCheckInService.TodayStatusResponse today(@AuthenticationPrincipal WorkerPrincipal principal) {
         if (principal == null) {
-            throw new UnauthorizedException("UNAUTHORIZED", "Worker session is required.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Employee session is required.");
         }
         return checkInService.getTodayStatus(principal.workerId());
     }
@@ -55,7 +55,7 @@ public class AttendanceController {
             @RequestParam(required = false) String month
     ) {
         if (principal == null) {
-            throw new UnauthorizedException("UNAUTHORIZED", "Worker session is required.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Employee session is required.");
         }
         YearMonth ym;
         if (month == null || month.isBlank()) {
@@ -77,7 +77,7 @@ public class AttendanceController {
             @Valid @RequestBody CheckInRequest request
     ) {
         if (principal == null) {
-            throw new UnauthorizedException("UNAUTHORIZED", "Worker session is required.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Employee session is required.");
         }
         rateLimiterService.checkLimit("check-in:" + principal.workerId(), 20, Duration.ofMinutes(5));
         String effectiveIdemKey = (request.idempotencyKey() != null && !request.idempotencyKey().isBlank())

@@ -72,16 +72,16 @@ public class BiometricsVerificationService {
         }
 
         Worker actor = workerRepository.findById(actorWorkerId)
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Authenticated worker not found."));
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Authenticated employee not found."));
         if (actor.getStatus() != WorkerStatus.REGISTERED) {
-            throw new ForbiddenException("WORKER_NOT_ACTIVE", "Worker account is not active.");
+            throw new ForbiddenException("WORKER_NOT_ACTIVE", "Employee account is not active.");
         }
 
         AttendanceSettings settings = settingsRepository.findTopByOrderByEffectiveFromUtcDesc()
                 .orElseThrow(() -> new IllegalStateException("Attendance settings not configured"));
 
         if (mode == VerificationMode.PROXY && !settings.isProxyEnabled()) {
-            throw new ForbiddenException("PROXY_DISABLED", "Marking attendance for another worker is disabled by policy.");
+            throw new ForbiddenException("PROXY_DISABLED", "Marking attendance for another employee is disabled by policy.");
         }
 
         byte[] imageBytes = imageValidator.decodeBase64(imageBase64);
@@ -190,9 +190,9 @@ public class BiometricsVerificationService {
         MatchCandidate match;
         if (workerCodeHint != null && !workerCodeHint.isBlank()) {
             Worker requested = workerRepository.findByWorkerCode(workerCodeHint.trim().toUpperCase())
-                    .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker code was not found."));
+                    .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Employee code was not found."));
             if (requested.getStatus() != WorkerStatus.REGISTERED) {
-                throw new ValidationException("WORKER_NOT_ACTIVE", "Worker account is not active for attendance.");
+                throw new ValidationException("WORKER_NOT_ACTIVE", "Employee account is not active for attendance.");
             }
             match = matchSpecificWorker(requested, probe.embedding(), threshold);
         } else {
@@ -250,7 +250,7 @@ public class BiometricsVerificationService {
 
     private MatchCandidate matchSpecificWorker(Worker target, float[] probeEmbedding, double threshold) {
         WorkerBiometric bio = biometricRepository.findByWorkerId(target.getId())
-                .orElseThrow(() -> new ValidationException("BIOMETRICS_NOT_ENROLLED", "Face template is not enrolled for this worker."));
+                .orElseThrow(() -> new ValidationException("BIOMETRICS_NOT_ENROLLED", "Face template is not enrolled for this employee."));
         if (!isTemplateCompatible(bio, probeEmbedding.length)) {
             throw new ValidationException("BIOMETRICS_MODEL_MISMATCH", "Enrolled face template must be re-enrolled for the active recognition model.");
         }
@@ -262,12 +262,12 @@ public class BiometricsVerificationService {
     private MatchCandidate matchTargetWorkerForProxy(Worker actor, String targetWorkerCode, float[] probeEmbedding, double threshold) {
         if (targetWorkerCode != null && !targetWorkerCode.isBlank()) {
             Worker requested = workerRepository.findByWorkerCode(targetWorkerCode.trim().toUpperCase())
-                    .orElseThrow(() -> new ResourceNotFoundException("TARGET_WORKER_NOT_FOUND", "Target worker code was not found."));
+                    .orElseThrow(() -> new ResourceNotFoundException("TARGET_WORKER_NOT_FOUND", "Target employee code was not found."));
             if (requested.getId().equals(actor.getId())) {
                 throw new ValidationException("SELF_PROXY_NOT_ALLOWED", "Use regular self check-in for your own attendance.");
             }
             if (requested.getStatus() != WorkerStatus.REGISTERED) {
-                throw new ValidationException("TARGET_WORKER_NOT_ACTIVE", "Target worker is not active for attendance.");
+                throw new ValidationException("TARGET_WORKER_NOT_ACTIVE", "Target employee is not active for attendance.");
             }
             return matchSpecificWorker(requested, probeEmbedding, threshold);
         }

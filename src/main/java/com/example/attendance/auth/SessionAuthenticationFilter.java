@@ -69,6 +69,8 @@ public class SessionAuthenticationFilter extends OncePerRequestFilter {
                 || "/index.html".equals(path)
                 || "/worker".equals(path)
                 || path.startsWith("/worker/")
+                || "/employee".equals(path)
+                || path.startsWith("/employee/")
                 || "/service-worker.js".equals(path)
                 || "/api/v1/biometrics/config".equals(path)
                 || path.startsWith("/api/v1/attendance/kiosk/");

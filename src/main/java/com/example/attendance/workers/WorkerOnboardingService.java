@@ -79,13 +79,13 @@ public class WorkerOnboardingService {
         }
 
         Worker worker = workerRepository.findById(invitation.getWorkerId())
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Invited worker record not found."));
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Invited employee record not found."));
 
         if (worker.getStatus() == WorkerStatus.DISABLED) {
-            throw new ConflictException("WORKER_DISABLED", "This worker account is disabled.");
+            throw new ConflictException("WORKER_DISABLED", "This employee account is disabled.");
         }
         if (worker.getStatus() == WorkerStatus.REGISTERED) {
-            throw new ConflictException("WORKER_ALREADY_REGISTERED", "This worker is already registered.");
+            throw new ConflictException("WORKER_ALREADY_REGISTERED", "This employee is already registered.");
         }
 
         return new InvitationValidationResult(
@@ -123,10 +123,10 @@ public class WorkerOnboardingService {
         }
 
         Worker worker = workerRepository.findById(invitation.getWorkerId())
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Invited worker not found."));
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Invited employee not found."));
 
         if (worker.getStatus() != WorkerStatus.INVITED) {
-            throw new ConflictException("WORKER_NOT_ELIGIBLE", "Worker cannot register in status " + worker.getStatus());
+            throw new ConflictException("WORKER_NOT_ELIGIBLE", "Employee cannot register in status " + worker.getStatus());
         }
 
         String effectiveConsentVersion = (consentVersion == null || consentVersion.isBlank())
@@ -221,7 +221,7 @@ public class WorkerOnboardingService {
         if (!consentGiven) {
             throw new AppException(
                     "CONSENT_REQUIRED_FOR_BIOMETRICS",
-                    "Worker consent is required before enrolling a face template.",
+                    "Employee consent is required before enrolling a face template.",
                     HttpStatus.UNPROCESSABLE_ENTITY
             );
         }
@@ -287,30 +287,30 @@ public class WorkerOnboardingService {
     ) {
         if (workerId != null) {
             Worker existing = workerRepository.findById(workerId)
-                    .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker not found."));
+                    .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Employee not found."));
             if (existing.getStatus() == WorkerStatus.DISABLED) {
-                throw new ConflictException("WORKER_DISABLED", "Disabled workers cannot be enrolled.");
+                throw new ConflictException("WORKER_DISABLED", "Disabled employees cannot be enrolled.");
             }
             if (biometricRepository.findByWorkerId(existing.getId()).isPresent()) {
                 throw new ConflictException("BIOMETRICS_ALREADY_ENROLLED",
-                        "Biometrics already exist for this worker. Reset biometrics first to re-enroll.");
+                        "Biometrics already exist for this employee. Reset biometrics first to re-enroll.");
             }
             return existing;
         }
 
         if (workerCode == null || workerCode.isBlank()) {
-            throw new ValidationException("WORKER_CODE_REQUIRED", "Worker code is required for new worker registration.");
+            throw new ValidationException("WORKER_CODE_REQUIRED", "Employee code is required for new employee registration.");
         }
         String normalizedCode = workerCode.trim().toUpperCase();
         var existingOpt = workerRepository.findByWorkerCode(normalizedCode);
         if (existingOpt.isPresent()) {
             Worker existing = existingOpt.get();
             if (existing.getStatus() == WorkerStatus.DISABLED) {
-                throw new ConflictException("WORKER_DISABLED", "Worker " + normalizedCode + " is disabled.");
+                throw new ConflictException("WORKER_DISABLED", "Employee " + normalizedCode + " is disabled.");
             }
             if (biometricRepository.findByWorkerId(existing.getId()).isPresent()) {
                 throw new ConflictException("BIOMETRICS_ALREADY_ENROLLED",
-                        "Worker " + normalizedCode + " already has enrolled biometrics. Reset biometrics first to re-enroll.");
+                        "Employee " + normalizedCode + " already has enrolled biometrics. Reset biometrics first to re-enroll.");
             }
             return existing;
         }
@@ -337,7 +337,7 @@ public class WorkerOnboardingService {
             );
         }
         if (biometricRepository.findByWorkerId(worker.getId()).isPresent()) {
-            throw new ConflictException("BIOMETRICS_ALREADY_ENROLLED", "Biometrics already exist for this worker.");
+            throw new ConflictException("BIOMETRICS_ALREADY_ENROLLED", "Biometrics already exist for this employee.");
         }
         byte[] imageBytes = imageValidator.decodeBase64(imageBase64);
         FaceRecognitionProvider.ExtractionResult extraction = faceProvider.extractEmbedding(imageBytes);

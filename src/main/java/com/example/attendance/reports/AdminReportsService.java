@@ -62,8 +62,8 @@ public class AdminReportsService {
 
         StringBuilder csv = new StringBuilder();
         List<String> headers = new ArrayList<>();
-        headers.add("Worker Code");
-        headers.add("Worker Name");
+        headers.add("Employee Code");
+        headers.add("Employee Name");
         headers.add("Team");
         headers.add("Status");
         headers.add("Configured Working Days");

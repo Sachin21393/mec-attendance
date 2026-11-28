@@ -119,7 +119,7 @@ async function loadDashboardAndGrid() {
     document.getElementById('kpi-notdue-today').textContent = dashboard.notDueTodayCount;
 
     document.getElementById('grid-subtitle').textContent =
-      `${grid.month} · ${grid.configuredWorkingDays} configured working days · ${grid.totalWorkers} workers`;
+      `${grid.month} · ${grid.configuredWorkingDays} configured working days · ${grid.totalWorkers} employees`;
 
     // Sync team filter options
     const teamSelect = document.getElementById('grid-team-filter');
@@ -138,7 +138,7 @@ async function loadDashboardAndGrid() {
     tableWrap.hidden = grid.rows.length === 0;
 
     document.getElementById('pagination-info').textContent =
-      `Page ${grid.page + 1} of ${Math.max(1, grid.totalPages)} (${grid.totalWorkers} workers)`;
+      `Page ${grid.page + 1} of ${Math.max(1, grid.totalPages)} (${grid.totalWorkers} employees)`;
     document.getElementById('btn-page-prev').disabled = grid.page <= 0;
     document.getElementById('btn-page-next').disabled = grid.page + 1 >= grid.totalPages;
   } catch (err) {
@@ -157,7 +157,7 @@ function renderGrid(grid) {
   const headerRow = document.createElement('tr');
   const workerTh = document.createElement('th');
   workerTh.className = 'sticky-col';
-  workerTh.textContent = 'Worker';
+  workerTh.textContent = 'Employee';
   headerRow.appendChild(workerTh);
 
   const summaryTh = document.createElement('th');
@@ -248,7 +248,7 @@ async function openDetailDrawer(recordId) {
   try {
     const d = await apiFetch(`/api/v1/admin/attendance/${encodeURIComponent(recordId)}`);
     body.innerHTML = `
-      <div class="detail-kv"><span>Worker</span><strong>${escapeHtml(d.subjectWorkerName)} (${escapeHtml(d.subjectWorkerCode)})</strong></div>
+      <div class="detail-kv"><span>Employee</span><strong>${escapeHtml(d.subjectWorkerName)} (${escapeHtml(d.subjectWorkerCode)})</strong></div>
       <div class="detail-kv"><span>Date</span><strong>${escapeHtml(d.attendanceDate)}</strong></div>
       <div class="detail-kv"><span>Local Check-in</span><strong>${escapeHtml(d.checkInLocalTime)} (${escapeHtml(d.timezoneId)})</strong></div>
       <div class="detail-kv"><span>Status</span><strong>${escapeHtml(d.attendanceStatus)}</strong></div>
@@ -328,9 +328,9 @@ function openManualExceptionDrawer(workerId, fullName, workerCode, date) {
   drawer.hidden = false;
   body.innerHTML = `
     <p class="helper-text" style="margin-bottom: 12px;">
-      Record audited manual attendance when a worker cannot use face recognition (camera unavailable, disability, or consent fallback).
+      Record audited manual attendance when an employee cannot use face recognition (camera unavailable, disability, or consent fallback).
     </p>
-    <div class="detail-kv"><span>Worker</span><strong>${escapeHtml(fullName)} (${escapeHtml(workerCode)})</strong></div>
+    <div class="detail-kv"><span>Employee</span><strong>${escapeHtml(fullName)} (${escapeHtml(workerCode)})</strong></div>
     <div class="detail-kv"><span>Date</span><strong>${escapeHtml(date)}</strong></div>
     <div id="drawer-error" class="banner banner-error" style="margin-top: 12px;" hidden></div>
     <form id="form-manual-exception" class="inline-form-card" style="margin-top: 16px;">
@@ -416,13 +416,13 @@ function openDeleteModal(workersList, isBulk) {
   reasonLabel.textContent = isBulk ? 'Reason for deletion (required)' : 'Reason for deletion (optional)';
 
   if (isBulk) {
-    title.textContent = `Delete ${workersList.length} Selected Workers`;
+    title.textContent = `Delete ${workersList.length} Selected Employees`;
     const names = workersList.slice(0, 5).map((w) => `${w.fullName} (${w.workerCode})`).join(', ');
     const extra = workersList.length > 5 ? ` and ${workersList.length - 5} more` : '';
     summary.textContent = `Permanently delete ${names}${extra}? Their attendance records, biometric templates, and sessions will be removed. Audit history is retained.`;
   } else {
     const w = workersList[0];
-    title.textContent = `Delete Worker ${w.workerCode}`;
+    title.textContent = `Delete Employee ${w.workerCode}`;
     summary.textContent = `Permanently delete ${w.fullName} (${w.workerCode})? Their attendance records, biometric template, and sessions will be removed. Audit history is retained.`;
   }
 
@@ -440,7 +440,7 @@ async function loadWorkersTable() {
   const tbody = document.getElementById('workers-tbody');
   const query = document.getElementById('workers-search')?.value.trim() || '';
   const status = document.getElementById('workers-status-filter')?.value || '';
-  tbody.innerHTML = '<tr><td colspan="8" class="helper-text">Loading workers...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" class="helper-text">Loading employees...</td></tr>';
   try {
     const page = await apiFetch(
       `/api/v1/admin/workers?size=100&query=${encodeURIComponent(query)}&status=${encodeURIComponent(status)}`
@@ -453,7 +453,7 @@ async function loadWorkersTable() {
 
     tbody.innerHTML = '';
     if (page.content.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" class="helper-text">No workers found. Register workers using "+ Register Worker (Photo)".</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="helper-text">No employees found. Register employees using "+ Register Employee (Photo)".</td></tr>';
       syncWorkersBulkUi();
       return;
     }
@@ -510,7 +510,7 @@ async function loadWorkersTable() {
           await apiFetch(`/api/v1/admin/workers/${btn.dataset.id}/sessions/revoke`, { method: 'POST' });
           await loadWorkersTable();
         } catch (err) {
-          setGlobalError(err.message || 'Could not revoke worker sessions.');
+          setGlobalError(err.message || 'Could not revoke employee sessions.');
         }
       });
     });
@@ -537,7 +537,7 @@ async function loadWorkersTable() {
             `Re-enabled ${res.fullName} (${res.workerCode}) (${res.status}).`, 3000);
           await loadWorkersTable();
         } catch (err) {
-          setGlobalError(err.message || 'Could not re-enable worker.');
+          setGlobalError(err.message || 'Could not re-enable employee.');
         }
       });
     });
@@ -547,7 +547,7 @@ async function loadWorkersTable() {
           await apiFetch(`/api/v1/admin/workers/${btn.dataset.id}/disable`, { method: 'POST' });
           await loadWorkersTable();
         } catch (err) {
-          setGlobalError(err.message || 'Could not disable worker.');
+          setGlobalError(err.message || 'Could not disable employee.');
         }
       });
     });
@@ -637,7 +637,7 @@ async function loadReportsPreview() {
 
     tbody.innerHTML = '';
     if (preview.workers.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="11" class="helper-text">No matching workers found.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" class="helper-text">No matching employees found.</td></tr>';
       return;
     }
     preview.workers.forEach((w) => {
@@ -941,7 +941,7 @@ function syncGeofenceStatusUi(settingsObj) {
     } else {
       locStatus.textContent = enabled
         ? 'Enter exact office coordinates or tap Use My Current Location at the office.'
-        : 'Geofencing is disabled. Workers can mark attendance without location restriction.';
+        : 'Geofencing is disabled. Employees can mark attendance without location restriction.';
     }
   }
 }
@@ -1015,7 +1015,7 @@ document.getElementById('btn-toggle-geofence')?.addEventListener('click', async 
     syncGeofenceStatusUi(saved);
     showSettingsFeedback(saved.geofenceEnabled
       ? `Office geofencing enabled (${saved.geofenceRadiusMeters || 50}m radius).`
-      : 'Office geofencing disabled. Workers can mark attendance from any location.');
+      : 'Office geofencing disabled. Employees can mark attendance from any location.');
   } catch (err) {
     setGlobalError(err.message || 'Could not update geofencing status.');
   } finally {
@@ -1233,7 +1233,7 @@ async function openEnrollCameraModal(targetWorker = null) {
     uploadBtn.hidden = false;
     snapBtn.textContent = 'Picture & Save';
   } else {
-    titleEl.textContent = 'Capture Worker Photo';
+    titleEl.textContent = 'Capture Employee Photo';
     consentRow.hidden = true;
     uploadBtn.hidden = true;
     snapBtn.textContent = 'Picture';
@@ -1287,7 +1287,7 @@ async function submitRowFaceEnrollment(worker, imageBase64) {
       `Face enrolled for ${enrolled.fullName} (${enrolled.workerCode}).`, 3000);
     await loadWorkersTable();
   } catch (err) {
-    setEnrollCamModalError(err.message || 'Could not enroll worker face.');
+    setEnrollCamModalError(err.message || 'Could not enroll employee face.');
   } finally {
     snapBtn.disabled = false;
     snapBtn.textContent = enrollState.targetWorker ? 'Picture & Save' : 'Picture';
@@ -1346,7 +1346,7 @@ document.getElementById('btn-enroll-cam-cancel').addEventListener('click', close
 document.getElementById('btn-enroll-cam-upload').addEventListener('click', () => {
   setEnrollCamModalError('');
   if (enrollState.targetWorker && !document.getElementById('enroll-cam-consent').checked) {
-    setEnrollCamModalError('Please confirm the worker gave consent before enrolling.');
+    setEnrollCamModalError('Please confirm the employee gave consent before enrolling.');
     return;
   }
   enrollState.uploadFromModal = true;
@@ -1356,7 +1356,7 @@ document.getElementById('btn-enroll-cam-upload').addEventListener('click', () =>
 document.getElementById('btn-enroll-snap').addEventListener('click', async () => {
   setEnrollCamModalError('');
   if (enrollState.targetWorker && !document.getElementById('enroll-cam-consent').checked) {
-    setEnrollCamModalError('Please confirm the worker gave consent before enrolling.');
+    setEnrollCamModalError('Please confirm the employee gave consent before enrolling.');
     return;
   }
   const video = document.getElementById('enroll-video');
@@ -1427,15 +1427,15 @@ document.getElementById('form-enroll-worker').addEventListener('submit', async (
   const consentGiven = document.getElementById('enroll-consent-checkbox').checked;
 
   if (!workerCode) {
-    setEnrollError('Please enter a worker code (e.g. W001).');
+    setEnrollError('Please enter an employee code (e.g. W001).');
     return;
   }
   if (!fullName) {
-    setEnrollError('Please enter the worker’s full name.');
+    setEnrollError('Please enter the employee’s full name.');
     return;
   }
   if (!consentGiven) {
-    setEnrollError('Please confirm the worker gave consent before registering.');
+    setEnrollError('Please confirm the employee gave consent before registering.');
     return;
   }
   if (!enrollState.imageBase64) {
@@ -1461,9 +1461,9 @@ document.getElementById('form-enroll-worker').addEventListener('submit', async (
 
     enrollState.batchCount += 1;
     showTimedBanner('enroll-batch-banner',
-      `Registered ${enrolled.fullName} (${enrolled.workerCode}) — ${enrollState.batchCount} worker(s) registered in this session. Ready for the next worker.`, 3000);
+      `Registered ${enrolled.fullName} (${enrolled.workerCode}) — ${enrollState.batchCount} employee(s) registered in this session. Ready for the next employee.`, 3000);
     showTimedBanner('invite-created-banner',
-      `Worker ${enrolled.fullName} (${enrolled.workerCode}) registered with face template.`, 3000);
+      `Employee ${enrolled.fullName} (${enrolled.workerCode}) registered with face template.`, 3000);
 
     const codeInput = document.getElementById('enroll-worker-code');
     codeInput.value = '';
@@ -1476,10 +1476,10 @@ document.getElementById('form-enroll-worker').addEventListener('submit', async (
     await loadWorkersTable();
     codeInput.focus();
   } catch (err) {
-    setEnrollError(err.message || 'Could not enroll worker photo.');
+    setEnrollError(err.message || 'Could not enroll employee photo.');
   } finally {
     submitBtn.disabled = false;
-    submitBtn.textContent = 'Register & Next Worker';
+    submitBtn.textContent = 'Register & Next Employee';
   }
 });
 
@@ -1525,11 +1525,11 @@ document.getElementById('form-create-worker').addEventListener('submit', async (
         teamName: document.getElementById('new-worker-team').value.trim() || null
       }
     });
-    showTimedBanner(banner, `Worker ${res.worker.workerCode} invited. One-time invitation code: ${res.invitationCode}`, 8000);
+    showTimedBanner(banner, `Employee ${res.worker.workerCode} invited. One-time invitation code: ${res.invitationCode}`, 8000);
     e.target.reset();
     await loadWorkersTable();
   } catch (err) {
-    setGlobalError(err.message || 'Could not create worker invitation.');
+    setGlobalError(err.message || 'Could not create employee invitation.');
   }
 });
 
@@ -1613,10 +1613,10 @@ document.getElementById('form-delete-workers').addEventListener('submit', async 
     deletedIds.forEach((id) => selectedWorkerIds.delete(id));
     closeDeleteModal();
     showTimedBanner('invite-created-banner',
-      `Deleted ${result.deletedCount} worker(s): ${result.deletedWorkerCodes.join(', ')}.`, 3000);
+      `Deleted ${result.deletedCount} employee(s): ${result.deletedWorkerCodes.join(', ')}.`, 3000);
     await Promise.all([loadWorkersTable(), loadDashboardAndGrid()]);
   } catch (err) {
-    errEl.textContent = err.message || 'Could not delete worker(s).';
+    errEl.textContent = err.message || 'Could not delete employee(s).';
     errEl.hidden = false;
   } finally {
     submitBtn.disabled = false;

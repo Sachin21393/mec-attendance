@@ -102,10 +102,10 @@ public class WorkerOnboardingController {
     @GetMapping("/workers/me")
     public WorkerMeResponse me(@AuthenticationPrincipal WorkerPrincipal principal) {
         if (principal == null) {
-            throw new UnauthorizedException("UNAUTHORIZED", "Worker session is not active.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Employee session is not active.");
         }
         Worker worker = workerRepository.findById(principal.workerId())
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker not found."));
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Employee not found."));
         boolean enrolled = biometricRepository.findByWorkerId(worker.getId()).isPresent();
         return new WorkerMeResponse(
                 worker.getId(),
@@ -141,7 +141,7 @@ public class WorkerOnboardingController {
             HttpServletResponse httpResponse
     ) {
         if (principal == null) {
-            throw new UnauthorizedException("UNAUTHORIZED", "Worker session is not active.");
+            throw new UnauthorizedException("UNAUTHORIZED", "Employee session is not active.");
         }
         Instant now = Instant.now();
         List<WorkerSession> active = sessionRepository.findByWorkerIdAndRevokedAtUtcIsNull(principal.workerId());

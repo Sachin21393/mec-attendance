@@ -66,7 +66,7 @@ public class AttendanceCheckInService {
     @Transactional(readOnly = true)
     public TodayStatusResponse getTodayStatus(UUID workerId) {
         Worker worker = workerRepository.findById(workerId)
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker not found."));
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Employee not found."));
         AttendanceSettings settings = loadSettings();
         Instant now = clock.instant();
         LocalDate attendanceDate = calculator.resolveAttendanceDate(now, settings);
@@ -103,7 +103,7 @@ public class AttendanceCheckInService {
 
         AttendanceRecord rec = existingOpt.get();
         String actorName = rec.getActorWorkerId() == null ? "Admin"
-                : workerRepository.findById(rec.getActorWorkerId()).map(Worker::getFullName).orElse("Worker");
+                : workerRepository.findById(rec.getActorWorkerId()).map(Worker::getFullName).orElse("Employee");
         return new TodayStatusResponse(
                 attendanceDate,
                 dayConfig.timezone().getId(),
@@ -192,7 +192,7 @@ public class AttendanceCheckInService {
         if (replayOpt.isPresent()) {
             AttendanceRecord existing = replayOpt.get();
             if (!actorWorkerId.equals(existing.getActorWorkerId())) {
-                throw new ConflictException("IDEMPOTENCY_CONFLICT", "This request key belongs to another worker.");
+                throw new ConflictException("IDEMPOTENCY_CONFLICT", "This request key belongs to another employee.");
             }
             return buildReplayResponse(existing, actorWorkerId);
         }
@@ -202,7 +202,7 @@ public class AttendanceCheckInService {
             throw new ForbiddenException("VERIFICATION_MODE_MISMATCH", "Use kiosk check-in for kiosk verification tokens.");
         }
         if (!bioToken.getActorWorkerId().equals(actorWorkerId)) {
-            throw new ForbiddenException("VERIFICATION_ACTOR_MISMATCH", "Verification token does not belong to the signed-in worker.");
+            throw new ForbiddenException("VERIFICATION_ACTOR_MISMATCH", "Verification token does not belong to the signed-in employee.");
         }
         return executeCheckIn(actorWorkerId, sessionId, bioToken, cleanIdemKey, latitude, longitude);
     }
@@ -292,9 +292,9 @@ public class AttendanceCheckInService {
 
         Instant now = clock.instant();
         Worker subject = workerRepository.findById(bioToken.getSubjectWorkerId())
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker not found."));
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Employee not found."));
         if (subject.getStatus() != WorkerStatus.REGISTERED) {
-            throw new ForbiddenException("WORKER_NOT_ACTIVE", "Worker account is not active.");
+            throw new ForbiddenException("WORKER_NOT_ACTIVE", "Employee account is not active.");
         }
 
         AttendanceSettings settings = loadSettings();
@@ -451,9 +451,9 @@ public class AttendanceCheckInService {
         Instant now = clock.instant();
 
         Worker actor = workerRepository.findById(actorWorkerId)
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Actor worker not found."));
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Actor employee not found."));
         if (actor.getStatus() != WorkerStatus.REGISTERED) {
-            throw new ForbiddenException("WORKER_NOT_ACTIVE", "Worker account is not active.");
+            throw new ForbiddenException("WORKER_NOT_ACTIVE", "Employee account is not active.");
         }
 
         AttendanceMethod method = "PROXY".equalsIgnoreCase(bioToken.getVerificationMode())
@@ -476,14 +476,14 @@ public class AttendanceCheckInService {
         Worker subject;
         if (method == AttendanceMethod.PROXY) {
             if (!settings.isProxyEnabled()) {
-                throw new ForbiddenException("PROXY_DISABLED", "Marking attendance for another worker is disabled by policy.");
+                throw new ForbiddenException("PROXY_DISABLED", "Marking attendance for another employee is disabled by policy.");
             }
             if (bioToken.getSubjectWorkerId().equals(actor.getId())) {
                 throw new ValidationException("SELF_PROXY_NOT_ALLOWED", "Use regular self check-in for your own attendance.");
             }
             // Serialize concurrent proxy attempts by locking the actor worker row
             workerRepository.findByIdForUpdate(actor.getId())
-                    .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Actor worker not found."));
+                    .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Actor employee not found."));
             long usedProxyToday = attendanceRepository.countByActorWorkerIdAndAttendanceDateAndAttendanceMethod(
                     actor.getId(), attendanceDate, AttendanceMethod.PROXY);
             if (usedProxyToday >= settings.getMaxProxyPerActorPerDay()) {
@@ -500,17 +500,17 @@ public class AttendanceCheckInService {
                 );
                 throw new ForbiddenException(
                         "PROXY_LIMIT_REACHED",
-                        "You have reached the daily limit (" + settings.getMaxProxyPerActorPerDay() + ") for marking attendance for another worker."
+                        "You have reached the daily limit (" + settings.getMaxProxyPerActorPerDay() + ") for marking attendance for another employee."
                 );
             }
             subject = workerRepository.findById(bioToken.getSubjectWorkerId())
-                    .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Subject worker not found."));
+                    .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Subject employee not found."));
             if (subject.getStatus() != WorkerStatus.REGISTERED) {
-                throw new ForbiddenException("TARGET_WORKER_NOT_ACTIVE", "Target worker account is not active.");
+                throw new ForbiddenException("TARGET_WORKER_NOT_ACTIVE", "Target employee account is not active.");
             }
         } else {
             if (!bioToken.getSubjectWorkerId().equals(actor.getId())) {
-                throw new ForbiddenException("VERIFICATION_SUBJECT_MISMATCH", "Verification token does not match the signed-in worker.");
+                throw new ForbiddenException("VERIFICATION_SUBJECT_MISMATCH", "Verification token does not match the signed-in employee.");
             }
             subject = actor;
         }

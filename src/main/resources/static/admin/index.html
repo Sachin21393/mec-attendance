@@ -32,7 +32,7 @@
         <button id="btn-login-submit" type="submit" class="btn btn-primary btn-block">Sign in</button>
       </form>
       <p class="helper-text" style="text-align: center; margin-top: 16px;">
-        <a href="/worker/">Go to Worker Attendance App</a>
+        <a href="/worker/">Go to Employee Attendance App</a>
       </p>
     </section>
   </main>
@@ -54,7 +54,7 @@
       <nav class="nav-list">
         <button type="button" class="nav-item active" data-tab="dashboard">Dashboard</button>
         <button type="button" class="nav-item" data-tab="attendance">Attendance</button>
-        <button type="button" class="nav-item" data-tab="workers">Workers</button>
+        <button type="button" class="nav-item" data-tab="workers">Employees</button>
         <button type="button" class="nav-item" data-tab="reports">Reports / Export</button>
         <button type="button" class="nav-item" data-tab="settings">Settings</button>
         <button type="button" class="nav-item" data-tab="audit">Audit Log</button>
@@ -105,7 +105,7 @@
                 <p id="grid-subtitle" class="helper-text">Loading month overview...</p>
               </div>
               <div class="toolbar-filters">
-                <input id="grid-search" class="input" type="search" placeholder="Search worker name or code" style="min-width: 240px; max-width: 280px;">
+                <input id="grid-search" class="input" type="search" placeholder="Search employee name or code" style="min-width: 240px; max-width: 280px;">
                 <select id="grid-team-filter" class="select" style="max-width: 180px;">
                   <option value="">All teams</option>
                 </select>
@@ -132,7 +132,7 @@
             </div>
 
             <div id="grid-loading" class="skeleton-box" hidden>Loading attendance grid...</div>
-            <div id="grid-empty" class="helper-text" style="padding: 24px 0;" hidden>No workers match your search criteria.</div>
+            <div id="grid-empty" class="helper-text" style="padding: 24px 0;" hidden>No employees match your search criteria.</div>
 
             <div id="attendance-table-wrap" class="table-wrap">
               <table id="attendance-table" class="att-table">
@@ -151,17 +151,17 @@
           </section>
         </section>
 
-        <!-- Workers Tab -->
+        <!-- Employees Tab -->
         <section id="tab-workers" class="tab-panel" hidden>
           <div class="card">
             <div class="toolbar">
               <div>
-                <h2 style="margin: 0;">Workers</h2>
+                <h2 style="margin: 0;">Employees</h2>
                 <p class="helper-text">Manage invitations, admin-assisted photo enrollment, and device sessions.</p>
               </div>
               <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                <button id="btn-toggle-enroll-form" type="button" class="btn btn-primary">+ Register Worker (Photo)</button>
-                <button id="btn-toggle-invite-form" type="button" class="btn btn-secondary">+ Invite Worker</button>
+                <button id="btn-toggle-enroll-form" type="button" class="btn btn-primary">+ Register Employee (Photo)</button>
+                <button id="btn-toggle-invite-form" type="button" class="btn btn-secondary">+ Invite Employee</button>
               </div>
             </div>
 
@@ -170,8 +170,8 @@
             <form id="form-enroll-worker" class="inline-form-card" hidden>
               <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px;">
                 <div>
-                  <h3 style="margin: 0; font-size: 1rem;">Register Worker (With Photo)</h3>
-                  <p class="helper-text" style="margin: 2px 0 0;">Enter the worker details, click Start Camera to capture their picture, and save.</p>
+                  <h3 style="margin: 0; font-size: 1rem;">Register Employee (With Photo)</h3>
+                  <p class="helper-text" style="margin: 2px 0 0;">Enter the employee details, click Start Camera to capture their picture, and save.</p>
                 </div>
                 <button id="btn-enroll-close" type="button" class="btn btn-ghost" aria-label="Close registration panel">&times;</button>
               </div>
@@ -181,12 +181,12 @@
 
               <div class="form-grid">
                 <div class="field">
-                  <label for="enroll-worker-code">Worker code</label>
+                  <label for="enroll-worker-code">Employee code</label>
                   <input id="enroll-worker-code" class="input" type="text" placeholder="e.g. W001" required>
                 </div>
                 <div class="field">
                   <label for="enroll-worker-name">Full name</label>
-                  <input id="enroll-worker-name" class="input" type="text" placeholder="Worker full name" required>
+                  <input id="enroll-worker-name" class="input" type="text" placeholder="Employee full name" required>
                 </div>
                 <div class="field">
                   <label for="enroll-worker-team">Team</label>
@@ -201,7 +201,7 @@
                   <button id="btn-enroll-clear-photo" type="button" class="btn btn-ghost" hidden>Remove Photo</button>
                 </div>
                 <div id="enroll-preview-wrap" class="enroll-uploaded-thumb" hidden>
-                  <img id="enroll-preview-img" alt="Captured worker photo">
+                  <img id="enroll-preview-img" alt="Captured employee photo">
                   <span class="enroll-thumb-caption">Photo ready for registration</span>
                 </div>
                 <canvas id="enroll-canvas" hidden></canvas>
@@ -210,11 +210,11 @@
 
               <label class="checkbox-row" style="margin: 12px 0 14px;">
                 <input id="enroll-consent-checkbox" type="checkbox">
-                <span>Worker reviewed the face attendance privacy notice and gave consent for encrypted template enrollment.</span>
+                <span>Employee reviewed the face attendance privacy notice and gave consent for encrypted template enrollment.</span>
               </label>
 
               <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                <button id="btn-enroll-submit" type="submit" class="btn btn-primary">Register &amp; Next Worker</button>
+                <button id="btn-enroll-submit" type="submit" class="btn btn-primary">Register &amp; Next Employee</button>
               </div>
             </form>
 
@@ -231,12 +231,12 @@
             <form id="form-create-worker" class="inline-form-card" hidden>
               <div class="form-grid">
                 <div class="field">
-                  <label for="new-worker-code">Worker code</label>
+                  <label for="new-worker-code">Employee code</label>
                   <input id="new-worker-code" class="input" type="text" placeholder="e.g. W011" required>
                 </div>
                 <div class="field">
                   <label for="new-worker-name">Full name</label>
-                  <input id="new-worker-name" class="input" type="text" placeholder="Worker full name" required>
+                  <input id="new-worker-name" class="input" type="text" placeholder="Employee full name" required>
                 </div>
                 <div class="field">
                   <label for="new-worker-team">Team</label>
@@ -258,7 +258,7 @@
               <table class="data-table">
                 <thead>
                   <tr>
-                    <th style="width: 36px;"><input id="workers-select-all" type="checkbox" aria-label="Select all workers"></th>
+                    <th style="width: 36px;"><input id="workers-select-all" type="checkbox" aria-label="Select all employees"></th>
                     <th>Code</th>
                     <th>Name</th>
                     <th>Team</th>
@@ -283,7 +283,7 @@
                 <p id="reports-subtitle" class="helper-text">Preview monthly attendance totals before downloading UTF-8 CSV.</p>
               </div>
               <div class="toolbar-filters">
-                <input id="reports-search" class="input" type="search" placeholder="Filter worker name or code" style="min-width: 230px; max-width: 270px;">
+                <input id="reports-search" class="input" type="search" placeholder="Filter employee name or code" style="min-width: 230px; max-width: 270px;">
                 <select id="reports-team-filter" class="select" style="max-width: 170px;">
                   <option value="">All teams</option>
                 </select>
@@ -298,7 +298,7 @@
                 <thead>
                   <tr>
                     <th>Code</th>
-                    <th>Worker</th>
+                    <th>Employee</th>
                     <th>Team</th>
                     <th>Working days</th>
                     <th>Worked days</th>
@@ -392,7 +392,7 @@
 
               <label class="checkbox-row" style="margin: 8px 0 16px;">
                 <input id="set-proxy-enabled" type="checkbox">
-                <span>Allow workers to mark attendance for another present worker (Proxy attendance)</span>
+                <span>Allow employees to mark attendance for another present employee (Proxy attendance)</span>
               </label>
 
               <div class="inline-form-card" style="margin: 0 0 16px;">
@@ -477,7 +477,7 @@
                     <th>Timestamp (UTC)</th>
                     <th>Event Type</th>
                     <th>Actor</th>
-                    <th>Subject Worker</th>
+                    <th>Subject Employee</th>
                     <th>Correlation ID</th>
                     <th>Metadata</th>
                   </tr>
@@ -507,11 +507,11 @@
       <div id="drawer-body" class="drawer-body"></div>
     </aside>
 
-    <!-- Delete / Bulk Delete Worker Confirmation Modal -->
+    <!-- Delete / Bulk Delete Employee Confirmation Modal -->
     <div id="delete-worker-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">
       <div class="modal-card card">
         <div class="drawer-header" style="padding: 0 0 12px; margin-bottom: 12px;">
-          <h2 id="delete-modal-title" style="margin: 0; font-size: 1.125rem;">Delete Worker</h2>
+          <h2 id="delete-modal-title" style="margin: 0; font-size: 1.125rem;">Delete Employee</h2>
           <button id="btn-delete-modal-close" type="button" class="btn btn-ghost" aria-label="Close modal">&times;</button>
         </div>
         <p id="delete-modal-summary" class="helper-text" style="margin-bottom: 12px;"></p>
@@ -533,21 +533,21 @@
       </div>
     </div>
 
-    <!-- Pop-up Camera Capture Modal for Worker Registration -->
+    <!-- Pop-up Camera Capture Modal for Employee Registration -->
     <div id="enroll-camera-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="enroll-cam-modal-title">
       <div class="modal-card card" style="max-width: 520px;">
         <div class="drawer-header" style="padding: 0 0 12px; margin-bottom: 12px;">
-          <h2 id="enroll-cam-modal-title" style="margin: 0; font-size: 1.125rem;">Capture Worker Photo</h2>
+          <h2 id="enroll-cam-modal-title" style="margin: 0; font-size: 1.125rem;">Capture Employee Photo</h2>
           <button id="btn-enroll-cam-close" type="button" class="btn btn-ghost" aria-label="Close camera dialog">&times;</button>
         </div>
-        <p class="helper-text" style="margin-bottom: 10px;">Ask the worker to place their face clearly in the camera frame, then click <strong>Picture</strong>.</p>
+        <p class="helper-text" style="margin-bottom: 10px;">Ask the employee to place their face clearly in the camera frame, then click <strong>Picture</strong>.</p>
         <div id="enroll-cam-error" class="banner banner-error" hidden></div>
         <div class="enroll-preview-wrap" style="margin-bottom: 14px;">
           <video id="enroll-video" autoplay playsinline muted></video>
         </div>
         <label id="enroll-cam-consent-row" class="checkbox-row" style="margin: 0 0 12px;" hidden>
           <input id="enroll-cam-consent" type="checkbox">
-          <span>Worker reviewed the privacy notice and consented to face template enrollment.</span>
+          <span>Employee reviewed the privacy notice and consented to face template enrollment.</span>
         </label>
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
           <button id="btn-enroll-cam-upload" type="button" class="btn btn-ghost" hidden>Upload Photo</button>

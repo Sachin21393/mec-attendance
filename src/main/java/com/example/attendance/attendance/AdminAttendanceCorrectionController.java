@@ -60,7 +60,7 @@ public class AdminAttendanceCorrectionController {
             @AuthenticationPrincipal AdminPrincipal admin
     ) {
         Worker worker = workerRepository.findById(request.workerId())
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker not found."));
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Employee not found."));
 
         if (attendanceRepository.findBySubjectWorkerIdAndAttendanceDate(worker.getId(), request.attendanceDate()).isPresent()) {
             throw new ConflictException(
@@ -203,7 +203,7 @@ public class AdminAttendanceCorrectionController {
     }
 
     public record ManualAttendanceRequest(
-            @NotNull(message = "Worker ID is required") UUID workerId,
+            @NotNull(message = "Employee ID is required") UUID workerId,
             @NotNull(message = "Attendance date is required") LocalDate attendanceDate,
             @NotNull(message = "Attendance status is required") AttendanceStatus status,
             LocalTime checkInLocalTime,

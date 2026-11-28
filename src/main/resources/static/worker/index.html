@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="MEC Team">
-  <title>MEC Team Attendance — Worker</title>
+  <title>MEC Team Attendance — Employee</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/assets/icon-192.png">
@@ -48,10 +48,11 @@
       <!-- First Launch / Direct Kiosk Attendance -->
       <section id="view-welcome" class="card" hidden>
         <div id="kiosk-reg-banner" class="banner banner-success" hidden></div>
+        <div id="kiosk-location-success" class="banner banner-success" hidden></div>
         <div id="kiosk-geofence-error" class="banner banner-error" hidden></div>
         <h2 class="section-heading">Mark Your Attendance</h2>
         <p id="kiosk-workplace-meta" class="helper-text" style="margin-bottom: 14px;">
-          Registered workers can scan their face directly to record attendance.
+          Registered employees can scan their face directly to record attendance.
         </p>
 
         <div id="kiosk-status-card" class="status-summary-card" style="margin-bottom: 16px;">
@@ -73,6 +74,13 @@
           </div>
         </div>
 
+        <div id="kiosk-location-banner" class="banner banner-info" style="flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 14px;" hidden>
+          <span id="kiosk-location-prompt-text">Location permission is required to verify you are in the office zone.</span>
+          <button id="btn-enable-location" type="button" class="btn btn-primary" style="min-height: 38px; padding: 6px 14px; font-size: 0.875rem;">
+            Allow Location
+          </button>
+        </div>
+
         <button id="btn-kiosk-login" type="button" class="btn btn-primary btn-block btn-large">
           Login Attendance
         </button>
@@ -89,7 +97,7 @@
 
       <!-- Step 1: Invitation Code -->
       <section id="view-invite" class="card" hidden>
-        <h2 class="section-heading">Enter your worker code</h2>
+        <h2 class="section-heading">Enter your employee code</h2>
         <p class="helper-text" style="margin-bottom: 16px;">
           Enter the one-time invitation code given by your administrator.
         </p>
@@ -148,7 +156,7 @@
         <button id="btn-manual-back" type="button" class="btn btn-secondary btn-block">Back to start</button>
       </section>
 
-      <!-- Returning Worker Home -->
+      <!-- Returning Employee Home -->
       <section id="view-home" class="card" hidden>
         <div id="reg-success-banner" class="banner banner-success" hidden>
           Registration complete! Next time you open this app, you can mark attendance with one tap.
@@ -178,7 +186,7 @@
 
         <div id="proxy-action-wrap" style="margin-top: 12px;" hidden>
           <button id="btn-mark-proxy" type="button" class="btn btn-secondary btn-block">
-            Mark attendance for another worker
+            Mark attendance for another employee
           </button>
           <p id="proxy-quota-note" class="helper-text" style="margin-top: 6px; text-align: center;"></p>
         </div>
@@ -202,7 +210,7 @@
         <div id="camera-error" class="banner banner-error" hidden></div>
 
         <div id="proxy-target-wrap" class="field" hidden>
-          <label for="input-proxy-target-code">Colleague worker code (optional)</label>
+          <label for="input-proxy-target-code">Colleague employee code (optional)</label>
           <input id="input-proxy-target-code" class="input" type="text" autocomplete="off"
                  placeholder="Leave blank to match by face, e.g. W002">
         </div>
@@ -239,7 +247,7 @@
       <section id="view-proxy-confirm" class="card" hidden>
         <h2 class="section-heading">Confirm colleague attendance</h2>
         <p id="proxy-confirm-question" style="font-size: 1.0625rem; font-weight: 600; margin: 12px 0 20px;">
-          You are marking attendance for worker. Continue?
+          You are marking attendance for employee. Continue?
         </p>
         <div id="proxy-confirm-error" class="banner banner-error" hidden></div>
         <button id="btn-proxy-confirm-submit" type="button" class="btn btn-primary btn-block">
@@ -258,7 +266,7 @@
 
         <div id="result-details" class="status-summary-card">
           <div class="status-summary-row">
-            <span class="helper-text">Worker</span>
+            <span class="helper-text">Employee</span>
             <strong id="result-worker-name">-</strong>
           </div>
           <div class="status-summary-row">
@@ -285,7 +293,7 @@
 
         <div class="camera-actions">
           <button id="btn-result-next-worker" type="button" class="btn btn-primary btn-block" hidden>
-            Scan Next Worker
+            Scan Next Employee
           </button>
           <button id="btn-result-retry" type="button" class="btn btn-primary btn-block" hidden>
             Try Again

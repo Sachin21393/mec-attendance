@@ -83,7 +83,7 @@ public class AdminWorkerDeletionService {
         }
 
         if (rawWorkerIds == null || rawWorkerIds.isEmpty()) {
-            throw new ValidationException("WORKERS_REQUIRED", "Select at least one worker to delete.");
+            throw new ValidationException("WORKERS_REQUIRED", "Select at least one employee to delete.");
         }
         Set<UUID> uniqueIds = new LinkedHashSet<>(rawWorkerIds);
 
@@ -95,7 +95,7 @@ public class AdminWorkerDeletionService {
 
         List<Worker> targets = workerRepository.findAllById(uniqueIds);
         if (targets.size() != uniqueIds.size()) {
-            throw new ResourceNotFoundException("WORKER_NOT_FOUND", "One or more selected workers were not found.");
+            throw new ResourceNotFoundException("WORKER_NOT_FOUND", "One or more selected employees were not found.");
         }
 
         List<String> deletedCodes = targets.stream().map(Worker::getWorkerCode).sorted().toList();

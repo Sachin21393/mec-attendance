@@ -290,7 +290,7 @@ function renderTodayStatus(today) {
     const remaining = Math.max(0, (today.maxProxyPerDay || 0) - (today.proxyUsedToday || 0));
     proxyBtn.disabled = remaining === 0;
     proxyNote.textContent = remaining > 0
-      ? `The other worker must be present (${remaining} of ${today.maxProxyPerDay} remaining today).`
+      ? `The other employee must be present (${remaining} of ${today.maxProxyPerDay} remaining today).`
       : `Daily limit reached (${today.proxyUsedToday} of ${today.maxProxyPerDay} used today).`;
   } else {
     proxyWrap.hidden = true;
@@ -300,7 +300,7 @@ function renderTodayStatus(today) {
 async function refreshHome(justRegistered = false) {
   stopCamera();
   document.getElementById('reg-success-banner').hidden = !justRegistered;
-  const firstName = (state.worker.fullName || 'Worker').split(' ')[0];
+  const firstName = (state.worker.fullName || 'Employee').split(' ')[0];
   document.getElementById('home-greeting').textContent = `Welcome, ${firstName}`;
   document.getElementById('home-worker-meta').textContent =
     `${state.worker.fullName} (${state.worker.workerCode})${state.worker.teamName ? ' · ' + state.worker.teamName : ''}`;
@@ -359,6 +359,77 @@ function prewarmGeolocationIfGranted() {
   }).catch(() => {});
 }
 
+let locationPermWatcherBound = false;
+
+function renderLocationBannerState(permState) {
+  const banner = document.getElementById('kiosk-location-banner');
+  const textEl = document.getElementById('kiosk-location-prompt-text');
+  const btn = document.getElementById('btn-enable-location');
+  const geoInfo = document.getElementById('kiosk-geofence-info');
+  const radius = state.kioskStatus?.geofenceRadiusMeters || 50;
+
+  if (!banner || !state.kioskStatus?.geofenceEnabled) {
+    if (banner) banner.hidden = true;
+    return;
+  }
+
+  if (permState === 'granted') {
+    banner.hidden = true;
+    if (geoInfo) geoInfo.textContent = `${radius}m radius · Location allowed`;
+    prewarmGeolocationIfGranted();
+    return;
+  }
+
+  if (permState === 'denied') {
+    banner.className = 'banner banner-warn';
+    banner.hidden = false;
+    if (textEl) {
+      textEl.textContent = 'Location is currently blocked for this site. Tap Enable / Retry Location (or allow Location in your browser/app Site Settings -> Permissions -> Location -> Allow).';
+    }
+    if (btn) btn.textContent = 'Enable / Retry Location';
+    if (geoInfo) geoInfo.textContent = `${radius}m radius · Location blocked`;
+    return;
+  }
+
+  // 'prompt' or unknown (iOS Safari without Permissions API)
+  banner.className = 'banner banner-info';
+  banner.hidden = false;
+  if (textEl) {
+    textEl.textContent = `Office geofencing is active (${radius}m zone). Allow location access when prompted to mark attendance.`;
+  }
+  if (btn) btn.textContent = 'Allow Location Access';
+  if (geoInfo) geoInfo.textContent = `${radius}m radius · Location needed`;
+}
+
+function syncLocationPermissionUi() {
+  if (!state.kioskStatus?.geofenceEnabled) {
+    const banner = document.getElementById('kiosk-location-banner');
+    if (banner) banner.hidden = true;
+    return;
+  }
+  if (state.lastLocation && (Date.now() - state.lastLocation.capturedAtMs) < 60000) {
+    renderLocationBannerState('granted');
+    return;
+  }
+  if (!navigator.geolocation) {
+    renderLocationBannerState('denied');
+    return;
+  }
+  if (!navigator.permissions?.query) {
+    renderLocationBannerState('prompt');
+    return;
+  }
+  navigator.permissions.query({ name: 'geolocation' }).then((perm) => {
+    renderLocationBannerState(perm.state);
+    if (!locationPermWatcherBound) {
+      locationPermWatcherBound = true;
+      perm.onchange = () => renderLocationBannerState(perm.state);
+    }
+  }).catch(() => {
+    renderLocationBannerState('prompt');
+  });
+}
+
 function getCurrentGpsPosition(maxAgeMs = 8000) {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
@@ -374,18 +445,54 @@ function getCurrentGpsPosition(maxAgeMs = 8000) {
           capturedAtMs: Date.now()
         };
         state.lastLocation = loc;
+        renderLocationBannerState('granted');
         resolve(loc);
       },
       (err) => {
         if (err.code === 1) {
-          reject(new Error('Location permission is required to check the office zone. Please enable Location access in browser settings and try again.'));
+          renderLocationBannerState('denied');
+          const e = new Error('Location permission was denied. Please tap "Allow" when prompted, or allow Location in your browser/app Site Settings and tap Enable / Retry Location.');
+          e.permissionDenied = true;
+          reject(e);
         } else {
-          reject(new Error('Could not read GPS location. Please enable GPS/Location on your device and try again.'));
+          reject(new Error('Could not read GPS location. Please turn on device Location/GPS and try again.'));
         }
       },
       { enableHighAccuracy: true, timeout: 12000, maximumAge: maxAgeMs }
     );
   });
+}
+
+async function requestLocationFromUserButton() {
+  const btn = document.getElementById('btn-enable-location');
+  setBanner('kiosk-geofence-error', '');
+  setBanner('kiosk-location-success', '');
+  if (!navigator.geolocation) {
+    setBanner('kiosk-geofence-error', 'Location/GPS is unavailable in this browser.');
+    return;
+  }
+  const origLabel = btn ? btn.textContent : 'Allow Location Access';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Requesting location...';
+  }
+  try {
+    const loc = await getCurrentGpsPosition(0);
+    const check = await apiFetch('/api/v1/attendance/kiosk/location-check', {
+      method: 'POST',
+      body: { latitude: loc.latitude, longitude: loc.longitude }
+    });
+    setBanner('kiosk-location-success', check.message || 'Location enabled — you are inside the office zone.');
+  } catch (err) {
+    setBanner('kiosk-geofence-error', err?.message || 'Could not enable location access.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      if (btn.textContent === 'Requesting location...') {
+        btn.textContent = origLabel;
+      }
+    }
+  }
 }
 
 async function verifyGeofenceAndStartScan(action) {
@@ -394,6 +501,7 @@ async function verifyGeofenceAndStartScan(action) {
     return;
   }
   setBanner('kiosk-geofence-error', '');
+  setBanner('kiosk-location-success', '');
   if (!state.kioskStatus) {
     state.kioskStatus = await apiFetch('/api/v1/attendance/kiosk/status').catch(() => null);
   }
@@ -435,6 +543,7 @@ async function verifyGeofenceAndStartScan(action) {
 async function showKioskHome(registeredMsg = '') {
   stopCamera();
   setBanner('kiosk-geofence-error', '');
+  setBanner('kiosk-location-success', '');
   const regBanner = document.getElementById('kiosk-reg-banner');
   if (kioskRegTimer) {
     clearTimeout(kioskRegTimer);
@@ -488,7 +597,7 @@ async function showKioskHome(registeredMsg = '') {
       logoutBtn.disabled = false;
       logoutBtn.textContent = 'Logout Attendance';
     }
-    prewarmGeolocationIfGranted();
+    syncLocationPermissionUi();
   } catch {
     // Non-fatal fallback
   }
@@ -570,7 +679,7 @@ function showAttendanceSuccess(data) {
   const nextBtn = document.getElementById('btn-result-next-worker');
   if (nextBtn) {
     nextBtn.hidden = false;
-    nextBtn.textContent = isLogout ? 'Scan Next Worker (Logout)' : 'Scan Next Worker (Login)';
+    nextBtn.textContent = isLogout ? 'Scan Next Employee (Logout)' : 'Scan Next Employee (Login)';
   }
   showView('result');
 }
@@ -678,7 +787,7 @@ async function handleCameraCapture(imageBase64, opts = {}) {
       } else {
         stopAutoScan();
         setScanning(false);
-        showAttendanceFailure(err.message || 'Face did not match any registered worker. Please try again in better lighting.', true, true);
+        showAttendanceFailure(err.message || 'Face did not match any registered employee. Please try again in better lighting.', true, true);
       }
     } else {
       stopAutoScan();
@@ -793,6 +902,10 @@ async function init() {
   }
 }
 
+document.getElementById('btn-enable-location')?.addEventListener('click', () => {
+  requestLocationFromUserButton();
+});
+
 document.getElementById('btn-kiosk-login')?.addEventListener('click', () => {
   verifyGeofenceAndStartScan('LOGIN');
 });
@@ -820,7 +933,7 @@ document.getElementById('form-invite').addEventListener('submit', async (e) => {
     state.invitationCode = code;
     state.consentVersion = info.consentVersion;
     document.getElementById('invite-worker-meta').textContent =
-      `Worker code: ${info.workerCode}${info.teamName ? ' · Team: ' + info.teamName : ''}`;
+      `Employee code: ${info.workerCode}${info.teamName ? ' · Team: ' + info.teamName : ''}`;
     document.getElementById('input-full-name').value = info.suggestedName || '';
     document.getElementById('consent-notice-text').textContent = info.consentNotice;
     document.getElementById('checkbox-consent').checked = false;
@@ -848,7 +961,7 @@ document.getElementById('btn-consent-continue').addEventListener('click', () => 
 });
 
 document.getElementById('btn-decline-consent').addEventListener('click', async () => {
-  const name = document.getElementById('input-full-name').value.trim() || 'Worker';
+  const name = document.getElementById('input-full-name').value.trim() || 'Employee';
   try {
     await apiFetch('/api/v1/workers/register', {
       method: 'POST',

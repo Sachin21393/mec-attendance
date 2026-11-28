@@ -117,6 +117,7 @@ class ReportsAndCsvExportTest {
         String csvText = new String(csvRes.getResponse().getContentAsByteArray(), StandardCharsets.UTF_8);
         String[] lines = csvText.split("\r\n");
         assertThat(lines.length).isEqualTo(grid.get("rows").size() + 1);
+        assertThat(lines[0]).contains("Employee Code,Employee Name,");
 
         // Formula injection in team column neutralized
         assertThat(csvText).contains("\"'=HYPERLINK(\"\"http://evil\"\")\"");

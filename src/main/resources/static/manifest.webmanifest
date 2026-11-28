@@ -1,7 +1,7 @@
 {
   "name": "MEC Team Attendance",
   "short_name": "MEC Team",
-  "description": "Mobile-first daily attendance check-in for workers.",
+  "description": "Mobile-first daily attendance check-in for employees.",
   "start_url": "/worker/",
   "scope": "/",
   "display": "standalone",

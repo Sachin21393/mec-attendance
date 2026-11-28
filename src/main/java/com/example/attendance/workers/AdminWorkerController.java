@@ -108,7 +108,7 @@ public class AdminWorkerController {
     ) {
         String normalizedCode = request.workerCode().trim().toUpperCase();
         if (workerRepository.findByWorkerCode(normalizedCode).isPresent()) {
-            throw new ConflictException("WORKER_CODE_EXISTS", "A worker with code " + normalizedCode + " already exists.");
+            throw new ConflictException("WORKER_CODE_EXISTS", "An employee with code " + normalizedCode + " already exists.");
         }
 
         Instant now = Instant.now();
@@ -186,7 +186,7 @@ public class AdminWorkerController {
             @AuthenticationPrincipal AdminPrincipal admin
     ) {
         Worker worker = workerRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker not found."));
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Employee not found."));
         if (request.fullName() != null && !request.fullName().isBlank()) {
             worker.setFullName(request.fullName().trim());
         }
@@ -220,7 +220,7 @@ public class AdminWorkerController {
             @AuthenticationPrincipal AdminPrincipal admin
     ) {
         Worker worker = workerRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker not found."));
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Employee not found."));
         Instant now = Instant.now();
         worker.setStatus(WorkerStatus.DISABLED);
         worker.setUpdatedAt(now);
@@ -246,7 +246,7 @@ public class AdminWorkerController {
             @AuthenticationPrincipal AdminPrincipal admin
     ) {
         Worker worker = workerRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker not found."));
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Employee not found."));
         Instant now = Instant.now();
         boolean biometricsEnrolled = biometricRepository.findByWorkerId(worker.getId()).isPresent();
         worker.setStatus(biometricsEnrolled ? WorkerStatus.REGISTERED : WorkerStatus.INVITED);
@@ -272,7 +272,7 @@ public class AdminWorkerController {
             @AuthenticationPrincipal AdminPrincipal admin
     ) {
         Worker worker = workerRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker not found."));
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Employee not found."));
         int revoked = revokeAllSessions(worker.getId(), Instant.now());
 
         auditService.record(
@@ -310,7 +310,7 @@ public class AdminWorkerController {
             @AuthenticationPrincipal AdminPrincipal admin
     ) {
         Worker worker = workerRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Worker not found."));
+                .orElseThrow(() -> new ResourceNotFoundException("WORKER_NOT_FOUND", "Employee not found."));
         Instant now = Instant.now();
 
         biometricRepository.deleteByWorkerId(worker.getId());
@@ -375,7 +375,7 @@ public class AdminWorkerController {
     }
 
     public record CreateWorkerRequest(
-            @NotBlank(message = "Worker code is required") @Size(max = 40) String workerCode,
+            @NotBlank(message = "Employee code is required") @Size(max = 40) String workerCode,
             @NotBlank(message = "Full name is required") @Size(max = 160) String fullName,
             @Size(max = 100) String teamName,
             LocalDate employmentStartDate,
@@ -452,7 +452,7 @@ public class AdminWorkerController {
     }
 
     public record BulkDeleteWorkersRequest(
-            @NotEmpty(message = "Select at least one worker to delete") List<UUID> workerIds,
+            @NotEmpty(message = "Select at least one employee to delete") List<UUID> workerIds,
             @NotBlank(message = "Reason for deletion is required") @Size(max = 300) String reason,
             @NotBlank(message = "Administrator password is required") String adminPassword
     ) {

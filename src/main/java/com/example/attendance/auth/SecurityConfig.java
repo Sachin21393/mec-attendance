@@ -59,7 +59,7 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .headers(headers -> headers
                         .referrerPolicy(ref -> ref.policy(org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER))
-                        .permissionsPolicy(perm -> perm.policy("camera=(self), microphone=(), geolocation=()"))
+                        .permissionsPolicy(perm -> perm.policy("camera=(self), microphone=(), geolocation=(self)"))
                 )
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfRepo)
@@ -75,7 +75,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/", "/index.html",
-                                "/worker", "/worker/**", "/admin", "/admin/**", "/shared/**", "/assets/**",
+                                "/worker", "/worker/**", "/employee", "/employee/**", "/admin", "/admin/**", "/shared/**", "/assets/**",
                                 "/manifest.webmanifest", "/service-worker.js", "/favicon.ico"
                         ).permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
