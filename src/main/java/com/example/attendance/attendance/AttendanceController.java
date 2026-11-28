@@ -5,9 +5,12 @@ import com.example.attendance.auth.WorkerPrincipal;
 import com.example.attendance.biometrics.BiometricsVerificationService;
 import com.example.attendance.common.UnauthorizedException;
 import com.example.attendance.common.ValidationException;
+import com.example.attendance.leaves.LeaveService;
+import com.example.attendance.leaves.LeaveType;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,15 +32,18 @@ public class AttendanceController {
 
     private final AttendanceCheckInService checkInService;
     private final BiometricsVerificationService verificationService;
+    private final LeaveService leaveService;
     private final RateLimiterService rateLimiterService;
 
     public AttendanceController(
             AttendanceCheckInService checkInService,
             BiometricsVerificationService verificationService,
+            LeaveService leaveService,
             RateLimiterService rateLimiterService
     ) {
         this.checkInService = checkInService;
         this.verificationService = verificationService;
+        this.leaveService = leaveService;
         this.rateLimiterService = rateLimiterService;
     }
 
@@ -170,6 +176,32 @@ public class AttendanceController {
                 : checkInService.kioskCheckIn(verified.verificationToken(), effectiveIdemKey, request.latitude(), request.longitude());
     }
 
+    /**
+     * Marks a self-declared leave (Sick / Paid Leave or Annual Leave) after kiosk face verification.
+     */
+    @PostMapping("/kiosk/mark-leave")
+    public LeaveService.LeaveMarkResponse kioskMarkLeave(
+            @RequestHeader(value = "Idempotency-Key", required = false) String headerIdempotencyKey,
+            @Valid @RequestBody KioskMarkLeaveRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        String key = "kiosk-leave:" + (httpRequest.getRemoteAddr() != null ? httpRequest.getRemoteAddr() : "unknown");
+        rateLimiterService.checkLimit(key, 150, Duration.ofMinutes(5));
+        String effectiveIdemKey = (request.idempotencyKey() != null && !request.idempotencyKey().isBlank())
+                ? request.idempotencyKey()
+                : headerIdempotencyKey;
+        if (effectiveIdemKey == null || effectiveIdemKey.isBlank()) {
+            effectiveIdemKey = java.util.UUID.randomUUID().toString();
+        }
+        var replay = leaveService.findIdempotentReplay(effectiveIdemKey);
+        if (replay.isPresent()) {
+            return replay.get();
+        }
+        BiometricsVerificationService.KioskVerificationOutcome verified =
+                verificationService.verifyKiosk(request.workerCode(), request.imageBase64());
+        return leaveService.markKioskLeave(verified.verificationToken(), request.leaveType(), effectiveIdemKey);
+    }
+
     public record LocationCheckRequest(
             Double latitude,
             Double longitude
@@ -199,6 +231,14 @@ public class AttendanceController {
             AttendanceActionType actionType,
             Double latitude,
             Double longitude
+    ) {
+    }
+
+    public record KioskMarkLeaveRequest(
+            @Size(max = 40) String workerCode,
+            @NotBlank(message = "Image is required") String imageBase64,
+            @NotNull(message = "Leave type is required") LeaveType leaveType,
+            String idempotencyKey
     ) {
     }
 }

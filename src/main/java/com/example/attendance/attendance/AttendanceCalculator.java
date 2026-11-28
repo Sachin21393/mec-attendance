@@ -1,5 +1,6 @@
 package com.example.attendance.attendance;
 
+import com.example.attendance.leaves.LeaveRecord;
 import com.example.attendance.settings.AttendanceSettings;
 import com.example.attendance.settings.DayType;
 import com.example.attendance.settings.WorkCalendarDay;
@@ -101,6 +102,15 @@ public class AttendanceCalculator {
             AttendanceRecord existingRecord,
             Instant currentUtc
     ) {
+        return deriveDayState(dayConfig, existingRecord, null, currentUtc);
+    }
+
+    public DerivedGridState deriveDayState(
+            EffectiveDayConfig dayConfig,
+            AttendanceRecord existingRecord,
+            LeaveRecord leaveRecord,
+            Instant currentUtc
+    ) {
         if (dayConfig.dayType() == DayType.HOLIDAY) {
             return DerivedGridState.HOLIDAY;
         }
@@ -111,6 +121,9 @@ public class AttendanceCalculator {
             return existingRecord.getAttendanceStatus() == AttendanceStatus.LATE
                     ? DerivedGridState.LATE
                     : DerivedGridState.ON_TIME;
+        }
+        if (leaveRecord != null) {
+            return DerivedGridState.LEAVE;
         }
         LocalDateTime cutoffDateTime = resolveCutoffLocalDateTime(dayConfig);
         LocalDateTime nowLocal = currentUtc.atZone(dayConfig.timezone()).toLocalDateTime();
@@ -169,6 +182,7 @@ public class AttendanceCalculator {
         ON_TIME,
         LATE,
         ABSENT,
+        LEAVE,
         HOLIDAY,
         WEEKLY_OFF,
         NOT_DUE

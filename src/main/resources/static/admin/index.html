@@ -55,6 +55,7 @@
         <button type="button" class="nav-item active" data-tab="dashboard">Dashboard</button>
         <button type="button" class="nav-item" data-tab="attendance">Attendance</button>
         <button type="button" class="nav-item" data-tab="workers">Employees</button>
+        <button type="button" class="nav-item" data-tab="leaves">Leaves</button>
         <button type="button" class="nav-item" data-tab="reports">Reports / Export</button>
         <button type="button" class="nav-item" data-tab="settings">Settings</button>
         <button type="button" class="nav-item" data-tab="audit">Audit Log</button>
@@ -95,7 +96,10 @@
             <div class="card kpi-card kpi-ontime"><span class="kpi-label">On time</span><strong id="kpi-ontime-today" class="kpi-val">-</strong></div>
             <div class="card kpi-card kpi-late"><span class="kpi-label">Late</span><strong id="kpi-late-today" class="kpi-val">-</strong></div>
             <div class="card kpi-card kpi-absent"><span class="kpi-label">Absent</span><strong id="kpi-absent-today" class="kpi-val">-</strong></div>
+            <div class="card kpi-card"><span class="kpi-label">On leave today</span><strong id="kpi-leaves-today" class="kpi-val">-</strong></div>
             <div class="card kpi-card"><span class="kpi-label">Not due</span><strong id="kpi-notdue-today" class="kpi-val">-</strong></div>
+            <div class="card kpi-card"><span class="kpi-label">Pending leaves (balance)</span><strong id="kpi-leaves-pending" class="kpi-val">-</strong></div>
+            <div class="card kpi-card"><span class="kpi-label">Approved leaves (taken)</span><strong id="kpi-leaves-taken" class="kpi-val">-</strong></div>
           </div>
 
           <section class="card" style="margin-top: 16px;">
@@ -123,6 +127,7 @@
               <span class="legend-item"><span class="cell-pill cell-ON_TIME">&#10003;</span> On time</span>
               <span class="legend-item"><span class="cell-pill cell-LATE">L</span> Late</span>
               <span class="legend-item"><span class="cell-pill cell-ABSENT">&#10005;</span> Absent</span>
+              <span class="legend-item"><span class="cell-pill cell-LEAVE">LV</span> Leave</span>
               <span class="legend-item"><span class="cell-pill cell-HOLIDAY">H</span> Holiday</span>
               <span class="legend-item"><span class="cell-pill cell-WEEKLY_OFF">W</span> Weekly off</span>
               <span class="legend-item"><span class="cell-pill cell-NOT_DUE">&middot;</span> Not due</span>
@@ -274,6 +279,76 @@
           </div>
         </section>
 
+        <!-- Leaves Tab -->
+        <section id="tab-leaves" class="tab-panel" hidden>
+          <div id="leaves-kpi-grid" class="kpi-grid" style="margin-bottom: 16px;">
+            <div class="card kpi-card"><span class="kpi-label">Working days (month)</span><strong id="leaves-kpi-working-days" class="kpi-val">-</strong></div>
+            <div class="card kpi-card"><span class="kpi-label">Paid / Sick leave quota</span><strong id="leaves-kpi-paid-quota" class="kpi-val">-</strong></div>
+            <div class="card kpi-card"><span class="kpi-label">Annual leave quota</span><strong id="leaves-kpi-annual-quota" class="kpi-val">-</strong></div>
+            <div class="card kpi-card kpi-ontime"><span class="kpi-label">Approved / Taken leaves</span><strong id="leaves-kpi-taken" class="kpi-val">-</strong></div>
+            <div class="card kpi-card"><span class="kpi-label">Pending leave balance</span><strong id="leaves-kpi-pending" class="kpi-val">-</strong></div>
+          </div>
+
+          <div class="card" style="margin-bottom: 16px;">
+            <div class="toolbar">
+              <div>
+                <h2 style="margin: 0;">Employee Leave Balances</h2>
+                <p id="leaves-subtitle" class="helper-text">Track taken and remaining (pending) Paid / Sick and Annual leaves alongside monthly working days.</p>
+              </div>
+              <div class="toolbar-filters">
+                <input id="leaves-search" class="input" type="search" placeholder="Filter employee name or code" style="min-width: 220px; max-width: 260px;">
+                <select id="leaves-team-filter" class="select" style="max-width: 170px;">
+                  <option value="">All teams</option>
+                </select>
+                <button id="btn-leaves-refresh" type="button" class="btn btn-secondary">Refresh</button>
+                <button id="btn-leaves-settings" type="button" class="btn btn-primary">Configure Leave Quotas</button>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Employee</th>
+                    <th>Team</th>
+                    <th>Month Working Days</th>
+                    <th>Month Leaves</th>
+                    <th>Paid / Sick Taken</th>
+                    <th>Paid / Sick Pending</th>
+                    <th>Annual Taken</th>
+                    <th>Annual Pending</th>
+                    <th>Total Approved / Taken</th>
+                    <th>Total Pending</th>
+                  </tr>
+                </thead>
+                <tbody id="leaves-balance-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2 style="margin: 0 0 6px;">Leaves Recorded This Month</h2>
+            <p class="helper-text" style="margin-bottom: 12px;">All self-marked leaves and automatic post-cutoff leaves are auto-approved and immediately deducted.</p>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Code</th>
+                    <th>Employee</th>
+                    <th>Leave Type</th>
+                    <th>Source</th>
+                    <th>Status</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody id="leaves-entries-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
         <!-- Reports & CSV Export -->
         <section id="tab-reports" class="tab-panel" hidden>
           <div class="card">
@@ -305,6 +380,7 @@
                     <th>On time</th>
                     <th>Late</th>
                     <th>Absent</th>
+                    <th>Leaves</th>
                     <th>Holidays / Off</th>
                     <th>Early Logout</th>
                     <th>Extended Hours</th>
@@ -431,6 +507,27 @@
                     Default radius is 50 meters. Enter exact office coordinates or tap Use My Current Location at the office.
                   </span>
                 </div>
+              </div>
+
+              <div class="inline-form-card" style="margin: 0 0 16px;">
+                <h3 style="margin: 0 0 6px; font-size: 0.95rem;">Leave Policy &amp; Quotas</h3>
+                <p class="helper-text" style="margin-bottom: 12px;">
+                  Configure Paid / Sick leave and Annual leave quotas per employee, plus automatic leave marking after cutoff time.
+                </p>
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="set-paid-leave-quota">Paid / Sick leaves (per employee)</label>
+                    <input id="set-paid-leave-quota" class="input" type="number" min="0" max="365" value="12" required>
+                  </div>
+                  <div class="field">
+                    <label for="set-annual-leave-quota">Annual leaves (per employee)</label>
+                    <input id="set-annual-leave-quota" class="input" type="number" min="0" max="365" value="12" required>
+                  </div>
+                </div>
+                <label class="checkbox-row" style="margin-top: 4px;">
+                  <input id="set-auto-leave-cutoff" type="checkbox" checked>
+                  <span>Automatically mark unmarked employees as on Leave after absence cutoff time</span>
+                </label>
               </div>
 
               <div id="tech-settings-box" class="inline-form-card">

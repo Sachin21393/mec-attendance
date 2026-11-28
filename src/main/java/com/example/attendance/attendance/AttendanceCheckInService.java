@@ -9,6 +9,8 @@ import com.example.attendance.common.ConflictException;
 import com.example.attendance.common.ForbiddenException;
 import com.example.attendance.common.ResourceNotFoundException;
 import com.example.attendance.common.ValidationException;
+import com.example.attendance.leaves.LeaveRecordRepository;
+import com.example.attendance.leaves.LeaveSource;
 import com.example.attendance.settings.AttendanceSettings;
 import com.example.attendance.settings.AttendanceSettingsRepository;
 import com.example.attendance.settings.DayType;
@@ -35,6 +37,7 @@ import java.util.UUID;
 public class AttendanceCheckInService {
 
     private final AttendanceRecordRepository attendanceRepository;
+    private final LeaveRecordRepository leaveRepository;
     private final WorkerRepository workerRepository;
     private final AttendanceSettingsRepository settingsRepository;
     private final WorkCalendarRepository calendarRepository;
@@ -45,6 +48,7 @@ public class AttendanceCheckInService {
 
     public AttendanceCheckInService(
             AttendanceRecordRepository attendanceRepository,
+            LeaveRecordRepository leaveRepository,
             WorkerRepository workerRepository,
             AttendanceSettingsRepository settingsRepository,
             WorkCalendarRepository calendarRepository,
@@ -54,6 +58,7 @@ public class AttendanceCheckInService {
             Clock clock
     ) {
         this.attendanceRepository = attendanceRepository;
+        this.leaveRepository = leaveRepository;
         this.workerRepository = workerRepository;
         this.settingsRepository = settingsRepository;
         this.calendarRepository = calendarRepository;
@@ -522,6 +527,21 @@ public class AttendanceCheckInService {
                     ? subject.getFullName() + " (" + subject.getWorkerCode() + ") has already marked attendance today at " + timeStr
                     : "You have already marked attendance today at " + timeStr;
             throw new ConflictException("ALREADY_MARKED", msg);
+        }
+
+        var existingLeaveOpt = leaveRepository.findByWorkerIdAndLeaveDate(subject.getId(), attendanceDate);
+        if (existingLeaveOpt.isPresent()) {
+            var leaveRec = existingLeaveOpt.get();
+            if (leaveRec.getSource() == LeaveSource.AUTO_CUTOFF) {
+                leaveRepository.delete(leaveRec);
+                leaveRepository.flush();
+            } else {
+                throw new ConflictException(
+                        "LEAVE_ALREADY_MARKED",
+                        subject.getFullName() + " (" + subject.getWorkerCode() + ") already has "
+                                + leaveRec.getLeaveType().getDisplayLabel() + " marked for today."
+                );
+            }
         }
 
         AttendanceStatus status = calculator.evaluateCheckInStatus(now, dayConfig);

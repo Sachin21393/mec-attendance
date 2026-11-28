@@ -5,6 +5,8 @@ import com.example.attendance.audit.AuditService;
 import com.example.attendance.auth.AdminPrincipal;
 import com.example.attendance.common.ConflictException;
 import com.example.attendance.common.ResourceNotFoundException;
+import com.example.attendance.leaves.LeaveRecordRepository;
+import com.example.attendance.leaves.LeaveSource;
 import com.example.attendance.settings.AttendanceSettings;
 import com.example.attendance.settings.AttendanceSettingsRepository;
 import com.example.attendance.workers.Worker;
@@ -35,6 +37,7 @@ public class AdminAttendanceCorrectionController {
 
     private final AttendanceRecordRepository attendanceRepository;
     private final AttendanceCorrectionRepository correctionRepository;
+    private final LeaveRecordRepository leaveRepository;
     private final WorkerRepository workerRepository;
     private final AttendanceSettingsRepository settingsRepository;
     private final AuditService auditService;
@@ -42,12 +45,14 @@ public class AdminAttendanceCorrectionController {
     public AdminAttendanceCorrectionController(
             AttendanceRecordRepository attendanceRepository,
             AttendanceCorrectionRepository correctionRepository,
+            LeaveRecordRepository leaveRepository,
             WorkerRepository workerRepository,
             AttendanceSettingsRepository settingsRepository,
             AuditService auditService
     ) {
         this.attendanceRepository = attendanceRepository;
         this.correctionRepository = correctionRepository;
+        this.leaveRepository = leaveRepository;
         this.workerRepository = workerRepository;
         this.settingsRepository = settingsRepository;
         this.auditService = auditService;
@@ -68,6 +73,13 @@ public class AdminAttendanceCorrectionController {
                     "An attendance record already exists for " + worker.getFullName() + " on " + request.attendanceDate() + ". Use correction instead."
             );
         }
+
+        leaveRepository.findByWorkerIdAndLeaveDate(worker.getId(), request.attendanceDate())
+                .filter(l -> l.getSource() == LeaveSource.AUTO_CUTOFF)
+                .ifPresent(l -> {
+                    leaveRepository.delete(l);
+                    leaveRepository.flush();
+                });
 
         AttendanceSettings settings = settingsRepository.findTopByOrderByEffectiveFromUtcDesc()
                 .orElseThrow(() -> new IllegalStateException("Attendance settings not found."));

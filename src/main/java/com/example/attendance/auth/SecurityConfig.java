@@ -92,7 +92,8 @@ public class SecurityConfig {
                                 "/api/v1/attendance/kiosk/location-check",
                                 "/api/v1/attendance/kiosk/verify",
                                 "/api/v1/attendance/kiosk/check-in",
-                                "/api/v1/attendance/kiosk/mark"
+                                "/api/v1/attendance/kiosk/mark",
+                                "/api/v1/attendance/kiosk/mark-leave"
                         ).permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/workers/**", "/api/v1/biometrics/**", "/api/v1/attendance/**").hasRole("WORKER")

@@ -25,7 +25,7 @@ public class AdminReportsService {
         this.auditService = auditService;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public ReportPreviewResponse preview(YearMonth month, String query, String team) {
         MonthlyAttendanceQueryService.MonthlyGridResponse grid = queryService.getMonthlyGrid(month, query, team, 0, Integer.MAX_VALUE);
         List<WorkerReportSummary> workers = grid.rows().stream()
@@ -40,10 +40,14 @@ public class AdminReportsService {
                         r.onTimeDays(),
                         r.lateDays(),
                         r.absentDays(),
+                        r.leaveDays(),
                         r.holidayDays(),
                         r.weeklyOffDays(),
                         r.earlyLogoutDays(),
-                        r.extendedWorkHoursDays()
+                        r.extendedWorkHoursDays(),
+                        r.paidLeaveTaken(),
+                        r.annualLeaveTaken(),
+                        r.totalLeavePending()
                 ))
                 .toList();
         return new ReportPreviewResponse(
@@ -76,6 +80,10 @@ public class AdminReportsService {
         headers.add("Weekly Off Days");
         headers.add("Early Logouts");
         headers.add("Extended Work Hours");
+        headers.add("Leave Days");
+        headers.add("Paid/Sick Leaves Taken");
+        headers.add("Annual Leaves Taken");
+        headers.add("Total Leaves Pending");
 
         for (MonthlyAttendanceQueryService.GridDayHeader d : grid.days()) {
             String ds = d.date().toString();
@@ -104,9 +112,15 @@ public class AdminReportsService {
             cells.add(String.valueOf(row.weeklyOffDays()));
             cells.add(String.valueOf(row.earlyLogoutDays()));
             cells.add(String.valueOf(row.extendedWorkHoursDays()));
+            cells.add(String.valueOf(row.leaveDays()));
+            cells.add(String.valueOf(row.paidLeaveTaken()));
+            cells.add(String.valueOf(row.annualLeaveTaken()));
+            cells.add(String.valueOf(row.totalLeavePending()));
 
             for (MonthlyAttendanceQueryService.GridCell cell : row.cells()) {
-                cells.add(cell.state());
+                cells.add("LEAVE".equals(cell.state()) && cell.leaveTypeLabel() != null
+                        ? "LEAVE (" + cell.leaveTypeLabel() + ")"
+                        : cell.state());
                 cells.add(cell.checkInLocalTime() != null ? cell.checkInLocalTime() : "");
                 cells.add(cell.method() != null ? cell.method().name() : "");
                 if (cell.method() == AttendanceMethod.PROXY && cell.actorWorkerCode() != null) {
@@ -147,10 +161,14 @@ public class AdminReportsService {
             int onTimeDays,
             int lateDays,
             int absentDays,
+            int leaveDays,
             int holidayDays,
             int weeklyOffDays,
             int earlyLogoutDays,
-            int extendedWorkHoursDays
+            int extendedWorkHoursDays,
+            int paidLeaveTaken,
+            int annualLeaveTaken,
+            int totalLeavePending
     ) {
     }
 

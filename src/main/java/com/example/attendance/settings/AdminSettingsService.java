@@ -76,6 +76,12 @@ public class AdminSettingsService {
         if (req.geofenceLongitude() != null && (!Double.isFinite(req.geofenceLongitude()) || req.geofenceLongitude() < -180.0 || req.geofenceLongitude() > 180.0)) {
             throw new ValidationException("INVALID_GEOFENCE_COORDINATES", "Office longitude must be between -180 and 180.");
         }
+        if (req.paidLeaveQuota() != null && (req.paidLeaveQuota() < 0 || req.paidLeaveQuota() > 365)) {
+            throw new ValidationException("INVALID_LEAVE_QUOTA", "Paid / Sick leave quota must be between 0 and 365.");
+        }
+        if (req.annualLeaveQuota() != null && (req.annualLeaveQuota() < 0 || req.annualLeaveQuota() > 365)) {
+            throw new ValidationException("INVALID_LEAVE_QUOTA", "Annual leave quota must be between 0 and 365.");
+        }
 
         boolean nextGeofenceEnabled = req.geofenceEnabled() != null ? req.geofenceEnabled() : s.isGeofenceEnabled();
         Double nextLat = req.geofenceLatitude() != null ? req.geofenceLatitude() : s.getGeofenceLatitude();
@@ -135,6 +141,19 @@ public class AdminSettingsService {
         if (req.geofenceRadiusMeters() != null) {
             s.setGeofenceRadiusMeters(req.geofenceRadiusMeters());
         }
+        if (req.paidLeaveQuota() != null) {
+            s.setDefaultPaidLeaveQuota(req.paidLeaveQuota());
+        }
+        if (req.annualLeaveQuota() != null) {
+            s.setDefaultAnnualLeaveQuota(req.annualLeaveQuota());
+        }
+        if (req.autoMarkLeaveAfterCutoff() != null) {
+            boolean wasEnabled = s.isAutoMarkLeaveAfterCutoff();
+            s.setAutoMarkLeaveAfterCutoff(req.autoMarkLeaveAfterCutoff());
+            if (!wasEnabled && req.autoMarkLeaveAfterCutoff()) {
+                s.setAutoLeaveEffectiveFromDate(calculator.resolveAttendanceDate(now, s));
+            }
+        }
         s.setEffectiveFromUtc(req.effectiveFromUtc() != null ? req.effectiveFromUtc() : now);
         s.setUpdatedByAdminId(admin != null ? admin.adminUserId() : null);
         s.setUpdatedAt(now);
@@ -164,6 +183,9 @@ public class AdminSettingsService {
         after.put("maxProxy", s.getMaxProxyPerActorPerDay());
         after.put("geofenceEnabled", s.isGeofenceEnabled());
         after.put("geofenceRadiusMeters", s.getGeofenceRadiusMeters());
+        after.put("paidLeaveQuota", s.getDefaultPaidLeaveQuota());
+        after.put("annualLeaveQuota", s.getDefaultAnnualLeaveQuota());
+        after.put("autoMarkLeaveAfterCutoff", s.isAutoMarkLeaveAfterCutoff());
         after.put("effectiveFromUtc", s.getEffectiveFromUtc().toString());
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("before", before);
@@ -349,6 +371,9 @@ public class AdminSettingsService {
             Double geofenceLatitude,
             Double geofenceLongitude,
             int geofenceRadiusMeters,
+            int paidLeaveQuota,
+            int annualLeaveQuota,
+            boolean autoMarkLeaveAfterCutoff,
             Instant effectiveFromUtc,
             Instant updatedAt
     ) {
@@ -371,6 +396,9 @@ public class AdminSettingsService {
                     s.getGeofenceLatitude(),
                     s.getGeofenceLongitude(),
                     s.getGeofenceRadiusMeters(),
+                    s.getDefaultPaidLeaveQuota(),
+                    s.getDefaultAnnualLeaveQuota(),
+                    s.isAutoMarkLeaveAfterCutoff(),
                     s.getEffectiveFromUtc(),
                     s.getUpdatedAt()
             );
@@ -393,7 +421,10 @@ public class AdminSettingsService {
             Boolean geofenceEnabled,
             Double geofenceLatitude,
             Double geofenceLongitude,
-            Integer geofenceRadiusMeters
+            Integer geofenceRadiusMeters,
+            Integer paidLeaveQuota,
+            Integer annualLeaveQuota,
+            Boolean autoMarkLeaveAfterCutoff
     ) {
     }
 

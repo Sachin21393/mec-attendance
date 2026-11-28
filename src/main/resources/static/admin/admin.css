@@ -294,6 +294,7 @@
 .cell-ON_TIME { background: var(--status-ontime-bg); color: var(--status-ontime-fg); }
 .cell-LATE { background: var(--status-late-bg); color: var(--status-late-fg); }
 .cell-ABSENT { background: var(--status-absent-bg); color: var(--status-absent-fg); }
+.cell-LEAVE { background: #E0E7FF; color: #3730A3; }
 .cell-HOLIDAY { background: var(--status-holiday-bg); color: var(--status-holiday-fg); }
 .cell-WEEKLY_OFF { background: #F1F5F9; color: #64748B; }
 .cell-NOT_DUE { background: #F8FAFC; color: #94A3B8; }

@@ -3,6 +3,11 @@ package com.example.attendance.attendance;
 import com.example.attendance.audit.AuditEvent;
 import com.example.attendance.audit.AuditEventRepository;
 import com.example.attendance.common.ResourceNotFoundException;
+import com.example.attendance.leaves.LeaveRecord;
+import com.example.attendance.leaves.LeaveRecordRepository;
+import com.example.attendance.leaves.LeaveService;
+import com.example.attendance.leaves.LeaveSource;
+import com.example.attendance.leaves.LeaveType;
 import com.example.attendance.settings.AttendanceSettings;
 import com.example.attendance.settings.AttendanceSettingsRepository;
 import com.example.attendance.settings.DayType;
@@ -37,6 +42,8 @@ public class MonthlyAttendanceQueryService {
     private final WorkerRepository workerRepository;
     private final AttendanceRecordRepository attendanceRepository;
     private final AttendanceCorrectionRepository correctionRepository;
+    private final LeaveRecordRepository leaveRepository;
+    private final LeaveService leaveService;
     private final WorkCalendarRepository calendarRepository;
     private final AttendanceSettingsRepository settingsRepository;
     private final AuditEventRepository auditEventRepository;
@@ -47,6 +54,8 @@ public class MonthlyAttendanceQueryService {
             WorkerRepository workerRepository,
             AttendanceRecordRepository attendanceRepository,
             AttendanceCorrectionRepository correctionRepository,
+            LeaveRecordRepository leaveRepository,
+            LeaveService leaveService,
             WorkCalendarRepository calendarRepository,
             AttendanceSettingsRepository settingsRepository,
             AuditEventRepository auditEventRepository,
@@ -56,6 +65,8 @@ public class MonthlyAttendanceQueryService {
         this.workerRepository = workerRepository;
         this.attendanceRepository = attendanceRepository;
         this.correctionRepository = correctionRepository;
+        this.leaveRepository = leaveRepository;
+        this.leaveService = leaveService;
         this.calendarRepository = calendarRepository;
         this.settingsRepository = settingsRepository;
         this.auditEventRepository = auditEventRepository;
@@ -63,8 +74,9 @@ public class MonthlyAttendanceQueryService {
         this.clock = clock;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public DashboardSummary getDashboard(YearMonth month) {
+        leaveService.applyAutoCutoffLeavesForMonth(month);
         AttendanceSettings settings = loadSettings();
         Instant now = clock.instant();
         ZoneId zone = calculator.resolveZone(settings);
@@ -80,11 +92,13 @@ public class MonthlyAttendanceQueryService {
                 .toList();
 
         Map<LocalDate, Map<UUID, AttendanceRecord>> recordsByDateAndWorker = loadRecordsMatrix(month);
+        Map<LocalDate, Map<UUID, LeaveRecord>> leavesByDateAndWorker = loadLeavesMatrix(month);
 
         int presentToday = 0;
         int onTimeToday = 0;
         int lateToday = 0;
         int absentToday = 0;
+        int leavesToday = 0;
         int notDueToday = 0;
 
         WorkCalendarDay todayCal = calendarRepository.findByCalendarDate(workplaceToday).orElse(null);
@@ -93,13 +107,18 @@ public class MonthlyAttendanceQueryService {
                 .findByAttendanceDateBetween(workplaceToday, workplaceToday)
                 .stream()
                 .collect(Collectors.toMap(AttendanceRecord::getSubjectWorkerId, Function.identity(), (a, b) -> a));
+        Map<UUID, LeaveRecord> todayLeaves = leaveRepository
+                .findByLeaveDateBetween(workplaceToday, workplaceToday)
+                .stream()
+                .collect(Collectors.toMap(LeaveRecord::getWorkerId, Function.identity(), (a, b) -> a));
 
         for (Worker w : activeWorkers) {
             if (!isEmployedOn(w, workplaceToday)) {
                 continue;
             }
             AttendanceRecord rec = todayRecords.get(w.getId());
-            AttendanceCalculator.DerivedGridState state = calculator.deriveDayState(todayConfig, rec, now);
+            LeaveRecord leaveRec = todayLeaves.get(w.getId());
+            AttendanceCalculator.DerivedGridState state = calculator.deriveDayState(todayConfig, rec, leaveRec, now);
             switch (state) {
                 case ON_TIME -> {
                     presentToday++;
@@ -110,6 +129,7 @@ public class MonthlyAttendanceQueryService {
                     lateToday++;
                 }
                 case ABSENT -> absentToday++;
+                case LEAVE -> leavesToday++;
                 case NOT_DUE -> notDueToday++;
                 default -> {
                 }
@@ -119,6 +139,7 @@ public class MonthlyAttendanceQueryService {
         int monthlyOnTime = 0;
         int monthlyLate = 0;
         int monthlyAbsent = 0;
+        int monthlyLeaves = 0;
         int monthlyNotDue = 0;
         for (Worker w : activeWorkers) {
             for (AttendanceCalculator.EffectiveDayConfig dc : dayConfigs) {
@@ -128,16 +149,33 @@ public class MonthlyAttendanceQueryService {
                 AttendanceRecord rec = recordsByDateAndWorker
                         .getOrDefault(dc.date(), Map.of())
                         .get(w.getId());
-                AttendanceCalculator.DerivedGridState state = calculator.deriveDayState(dc, rec, now);
+                LeaveRecord leaveRec = leavesByDateAndWorker
+                        .getOrDefault(dc.date(), Map.of())
+                        .get(w.getId());
+                AttendanceCalculator.DerivedGridState state = calculator.deriveDayState(dc, rec, leaveRec, now);
                 switch (state) {
                     case ON_TIME -> monthlyOnTime++;
                     case LATE -> monthlyLate++;
                     case ABSENT -> monthlyAbsent++;
+                    case LEAVE -> monthlyLeaves++;
                     case NOT_DUE -> monthlyNotDue++;
                     default -> {
                     }
                 }
             }
+        }
+
+        Map<UUID, int[]> allLeaveCounts = leaveService.loadAllLeaveCountsByWorker();
+        int paidQuota = settings.getDefaultPaidLeaveQuota();
+        int annualQuota = settings.getDefaultAnnualLeaveQuota();
+        int totalApprovedLeaves = 0;
+        int totalPendingLeaves = 0;
+        for (Worker w : activeWorkers) {
+            int[] counts = allLeaveCounts.getOrDefault(w.getId(), new int[2]);
+            int paidTaken = counts[0];
+            int annualTaken = counts[1];
+            totalApprovedLeaves += (paidTaken + annualTaken);
+            totalPendingLeaves += Math.max(0, paidQuota - paidTaken) + Math.max(0, annualQuota - annualTaken);
         }
 
         return new DashboardSummary(
@@ -151,16 +189,23 @@ public class MonthlyAttendanceQueryService {
                 onTimeToday,
                 lateToday,
                 absentToday,
+                leavesToday,
                 notDueToday,
                 monthlyOnTime,
                 monthlyLate,
                 monthlyAbsent,
-                monthlyNotDue
+                monthlyLeaves,
+                monthlyNotDue,
+                totalApprovedLeaves,
+                totalPendingLeaves,
+                paidQuota,
+                annualQuota
         );
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public MonthlyGridResponse getMonthlyGrid(YearMonth month, String query, String team, int page, int size) {
+        leaveService.applyAutoCutoffLeavesForMonth(month);
         AttendanceSettings settings = loadSettings();
         Instant now = clock.instant();
         ZoneId zone = calculator.resolveZone(settings);
@@ -191,6 +236,8 @@ public class MonthlyAttendanceQueryService {
         Map<UUID, Worker> workersById = allWorkers.stream()
                 .collect(Collectors.toMap(Worker::getId, Function.identity()));
         Map<LocalDate, Map<UUID, AttendanceRecord>> recordsMatrix = loadRecordsMatrix(month);
+        Map<LocalDate, Map<UUID, LeaveRecord>> leavesMatrix = loadLeavesMatrix(month);
+        Map<UUID, int[]> allLeaveCounts = leaveService.loadAllLeaveCountsByWorker();
 
         List<GridDayHeader> days = dayConfigs.stream()
                 .map(dc -> new GridDayHeader(dc.date(), dc.dayType(), dc.note()))
@@ -198,7 +245,7 @@ public class MonthlyAttendanceQueryService {
 
         List<WorkerGridRow> rows = new ArrayList<>();
         for (Worker w : workerPage.getContent()) {
-            rows.add(buildWorkerRow(w, dayConfigs, recordsMatrix, workersById, zone, now));
+            rows.add(buildWorkerRow(w, dayConfigs, recordsMatrix, leavesMatrix, allLeaveCounts, settings, workersById, zone, now));
         }
 
         List<String> teams = allWorkers.stream()
@@ -223,7 +270,7 @@ public class MonthlyAttendanceQueryService {
         );
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<WorkerGridRow> getAllWorkerRowsForExport(YearMonth month, String query, String team) {
         MonthlyGridResponse full = getMonthlyGrid(month, query, team, 0, Integer.MAX_VALUE);
         return full.rows();
@@ -278,6 +325,9 @@ public class MonthlyAttendanceQueryService {
             Worker worker,
             List<AttendanceCalculator.EffectiveDayConfig> dayConfigs,
             Map<LocalDate, Map<UUID, AttendanceRecord>> recordsMatrix,
+            Map<LocalDate, Map<UUID, LeaveRecord>> leavesMatrix,
+            Map<UUID, int[]> allLeaveCounts,
+            AttendanceSettings settings,
             Map<UUID, Worker> workersById,
             ZoneId zone,
             Instant now
@@ -288,6 +338,7 @@ public class MonthlyAttendanceQueryService {
         int onTimeDays = 0;
         int lateDays = 0;
         int absentDays = 0;
+        int leaveDays = 0;
         int holidayDays = 0;
         int weeklyOffDays = 0;
         int earlyLogoutDays = 0;
@@ -295,8 +346,9 @@ public class MonthlyAttendanceQueryService {
 
         for (AttendanceCalculator.EffectiveDayConfig dc : dayConfigs) {
             AttendanceRecord rec = recordsMatrix.getOrDefault(dc.date(), Map.of()).get(worker.getId());
+            LeaveRecord leaveRec = leavesMatrix.getOrDefault(dc.date(), Map.of()).get(worker.getId());
             if (!isEmployedOn(worker, dc.date())) {
-                cells.add(new GridCell(dc.date(), "NOT_EMPLOYED", null, null, null, null, null, null, null, null));
+                cells.add(new GridCell(dc.date(), "NOT_EMPLOYED", null, null, null, null, null, null, null, null, null, null, null, null));
                 continue;
             }
             if (dc.dayType() == DayType.HOLIDAY) {
@@ -307,7 +359,7 @@ public class MonthlyAttendanceQueryService {
                 applicableWorkingDays++;
             }
 
-            AttendanceCalculator.DerivedGridState state = calculator.deriveDayState(dc, rec, now);
+            AttendanceCalculator.DerivedGridState state = calculator.deriveDayState(dc, rec, leaveRec, now);
             if (dc.dayType() == DayType.WORKING && rec != null) {
                 workedDays++;
                 if (state == AttendanceCalculator.DerivedGridState.ON_TIME) {
@@ -320,6 +372,8 @@ public class MonthlyAttendanceQueryService {
                 } else if (rec.getLogoutStatus() == LogoutStatus.EXTENDED_WORK_HOURS) {
                     extendedWorkHoursDays++;
                 }
+            } else if (state == AttendanceCalculator.DerivedGridState.LEAVE) {
+                leaveDays++;
             } else if (state == AttendanceCalculator.DerivedGridState.ABSENT) {
                 absentDays++;
             }
@@ -335,9 +389,19 @@ public class MonthlyAttendanceQueryService {
                     actor != null ? actor.getFullName() : null,
                     (rec != null && rec.getCheckOutAtUtc() != null) ? calculator.formatLocalTime(rec.getCheckOutAtUtc(), zone) : null,
                     rec != null ? rec.getLogoutStatus() : null,
-                    (rec != null && rec.getLogoutStatus() != null) ? rec.getLogoutStatus().getDisplayLabel() : null
+                    (rec != null && rec.getLogoutStatus() != null) ? rec.getLogoutStatus().getDisplayLabel() : null,
+                    leaveRec != null ? leaveRec.getLeaveType() : null,
+                    leaveRec != null ? leaveRec.getLeaveType().getDisplayLabel() : null,
+                    leaveRec != null ? leaveRec.getSource() : null,
+                    leaveRec != null ? leaveRec.getSource().getDisplayLabel() : null
             ));
         }
+
+        int[] counts = allLeaveCounts.getOrDefault(worker.getId(), new int[2]);
+        int paidTaken = counts[0];
+        int annualTaken = counts[1];
+        int paidPending = Math.max(0, settings.getDefaultPaidLeaveQuota() - paidTaken);
+        int annualPending = Math.max(0, settings.getDefaultAnnualLeaveQuota() - annualTaken);
 
         return new WorkerGridRow(
                 worker.getId(),
@@ -350,10 +414,17 @@ public class MonthlyAttendanceQueryService {
                 onTimeDays,
                 lateDays,
                 absentDays,
+                leaveDays,
                 holidayDays,
                 weeklyOffDays,
                 earlyLogoutDays,
                 extendedWorkHoursDays,
+                paidTaken,
+                paidPending,
+                annualTaken,
+                annualPending,
+                paidTaken + annualTaken,
+                paidPending + annualPending,
                 cells
         );
     }
@@ -383,6 +454,16 @@ public class MonthlyAttendanceQueryService {
         return matrix;
     }
 
+    private Map<LocalDate, Map<UUID, LeaveRecord>> loadLeavesMatrix(YearMonth month) {
+        List<LeaveRecord> leaves = leaveRepository.findByLeaveDateBetween(month.atDay(1), month.atEndOfMonth());
+        Map<LocalDate, Map<UUID, LeaveRecord>> matrix = new HashMap<>();
+        for (LeaveRecord l : leaves) {
+            matrix.computeIfAbsent(l.getLeaveDate(), d -> new HashMap<>())
+                    .put(l.getWorkerId(), l);
+        }
+        return matrix;
+    }
+
     private static boolean isEmployedOn(Worker worker, LocalDate date) {
         if (worker.getEmploymentStartDate() != null && date.isBefore(worker.getEmploymentStartDate())) {
             return false;
@@ -406,11 +487,17 @@ public class MonthlyAttendanceQueryService {
             int onTimeTodayCount,
             int lateTodayCount,
             int absentTodayCount,
+            int leavesTodayCount,
             int notDueTodayCount,
             int monthlyOnTimeCount,
             int monthlyLateCount,
             int monthlyAbsentCount,
-            int monthlyNotDueCount
+            int monthlyLeavesCount,
+            int monthlyNotDueCount,
+            int totalApprovedLeavesCount,
+            int totalPendingLeavesCount,
+            int paidLeaveQuota,
+            int annualLeaveQuota
     ) {
     }
 
@@ -427,7 +514,11 @@ public class MonthlyAttendanceQueryService {
             String actorWorkerName,
             String checkOutLocalTime,
             LogoutStatus logoutStatus,
-            String logoutStatusLabel
+            String logoutStatusLabel,
+            LeaveType leaveType,
+            String leaveTypeLabel,
+            LeaveSource leaveSource,
+            String leaveSourceLabel
     ) {
     }
 
@@ -442,10 +533,17 @@ public class MonthlyAttendanceQueryService {
             int onTimeDays,
             int lateDays,
             int absentDays,
+            int leaveDays,
             int holidayDays,
             int weeklyOffDays,
             int earlyLogoutDays,
             int extendedWorkHoursDays,
+            int paidLeaveTaken,
+            int paidLeavePending,
+            int annualLeaveTaken,
+            int annualLeavePending,
+            int totalLeaveTaken,
+            int totalLeavePending,
             List<GridCell> cells
     ) {
     }

@@ -3,6 +3,7 @@ import { apiFetch, ApiError, ensureCsrfToken } from '/shared/api.js';
 const views = {
   loading: document.getElementById('view-loading'),
   welcome: document.getElementById('view-welcome'),
+  leaveType: document.getElementById('view-leave-type'),
   invite: document.getElementById('view-invite'),
   consent: document.getElementById('view-consent'),
   manual: document.getElementById('view-manual-fallback'),
@@ -19,7 +20,8 @@ const state = {
   worker: null,
   today: null,
   cameraMode: 'kiosk', // 'kiosk' | 'register'
-  attendanceAction: 'LOGIN', // 'LOGIN' | 'LOGOUT'
+  attendanceAction: 'LOGIN', // 'LOGIN' | 'LOGOUT' | 'LEAVE'
+  selectedLeaveType: 'SICK_LEAVE', // 'SICK_LEAVE' | 'ANNUAL_LEAVE'
   invitationCode: '',
   consentVersion: '',
   fullName: '',
@@ -580,6 +582,7 @@ async function showKioskHome(registeredMsg = '') {
     }
     const loginBtn = document.getElementById('btn-kiosk-login');
     const logoutBtn = document.getElementById('btn-kiosk-logout');
+    const leaveBtn = document.getElementById('btn-kiosk-leave');
     if (k.dayType && k.dayType !== 'WORKING') {
       const label = k.dayType === 'HOLIDAY' ? 'Holiday' : 'Weekly off';
       document.getElementById('kiosk-shift-info').textContent = label;
@@ -587,6 +590,7 @@ async function showKioskHome(registeredMsg = '') {
       loginBtn.disabled = true;
       loginBtn.textContent = 'Non-working day';
       logoutBtn.disabled = true;
+      if (leaveBtn) leaveBtn.disabled = true;
     } else {
       document.getElementById('kiosk-shift-info').textContent =
         formatShiftAndGrace(k.shiftStartLocal, k.gracePeriodMinutes);
@@ -596,6 +600,7 @@ async function showKioskHome(registeredMsg = '') {
       loginBtn.textContent = 'Login Attendance';
       logoutBtn.disabled = false;
       logoutBtn.textContent = 'Logout Attendance';
+      if (leaveBtn) leaveBtn.disabled = false;
     }
     syncLocationPermissionUi();
   } catch {
@@ -621,6 +626,13 @@ function openCameraView(mode, action = state.attendanceAction || 'LOGIN') {
     guidance.textContent = 'Place your face inside the frame in good lighting. Keep only one face in frame.';
     actionBtn.textContent = 'Capture & Complete Registration';
     actionBtn.className = 'btn btn-primary btn-block';
+  } else if (action === 'LEAVE') {
+    heading.textContent = state.selectedLeaveType === 'SICK_LEAVE'
+      ? 'Sick Leave (Paid) — Scan Face'
+      : 'Annual Leave — Scan Face';
+    guidance.textContent = 'Look straight into the oval — scanning automatically to mark leave...';
+    actionBtn.textContent = 'Scan & Mark Leave';
+    actionBtn.className = 'btn btn-secondary btn-block';
   } else {
     heading.textContent = action === 'LOGOUT' ? 'Logout Attendance — Scan Face' : 'Login Attendance — Scan Face';
     guidance.textContent = 'Look straight into the oval — scanning automatically...';
@@ -684,6 +696,37 @@ function showAttendanceSuccess(data) {
   showView('result');
 }
 
+function showLeaveSuccess(data) {
+  stopCamera();
+  const icon = document.getElementById('result-icon-wrap');
+  icon.className = 'result-icon result-icon-success';
+  icon.innerHTML = '&#10003;';
+  document.getElementById('result-title').textContent = 'Leave marked successfully';
+  document.getElementById('result-subtitle').textContent =
+    `${data.employeeName} (${data.employeeCode}) — ${data.leaveTypeLabel} (Auto-approved).`;
+
+  document.getElementById('result-details').hidden = false;
+  document.getElementById('result-worker-name').textContent = `${data.employeeName} (${data.employeeCode})`;
+  document.getElementById('result-date').textContent = data.leaveDate;
+  document.getElementById('result-login-row').hidden = true;
+  document.getElementById('result-time-label').textContent = 'Remaining balance';
+  document.getElementById('result-time').textContent =
+    `Paid/Sick: ${data.paidLeavePending}/${data.paidLeaveQuota} left · Annual: ${data.annualLeavePending}/${data.annualLeaveQuota} left`;
+
+  const badge = document.getElementById('result-status-badge');
+  badge.className = 'status-badge status-ontime';
+  badge.textContent = 'Approved';
+  document.getElementById('result-method').textContent = data.leaveTypeLabel;
+
+  document.getElementById('btn-result-retry').hidden = true;
+  const nextBtn = document.getElementById('btn-result-next-worker');
+  if (nextBtn) {
+    nextBtn.hidden = false;
+    nextBtn.textContent = 'Scan Next Employee (Leave)';
+  }
+  showView('result');
+}
+
 function showAttendanceFailure(message, allowRetry = true, allowNextWorker = false) {
   stopCamera();
   const icon = document.getElementById('result-icon-wrap');
@@ -742,6 +785,19 @@ async function handleCameraCapture(imageBase64, opts = {}) {
       await showKioskHome(
         `Registered ${result.fullName || state.fullName} (${result.workerCode})! You can now mark attendance below.`
       );
+    } else if (state.attendanceAction === 'LEAVE') {
+      document.getElementById('camera-guidance').textContent = 'Recognizing face & recording leave...';
+      const leaveRes = await apiFetch('/api/v1/attendance/kiosk/mark-leave', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': state.pendingIdempotencyKey },
+        body: {
+          imageBase64,
+          leaveType: state.selectedLeaveType,
+          idempotencyKey: state.pendingIdempotencyKey
+        }
+      });
+      stopAutoScan();
+      showLeaveSuccess(leaveRes);
     } else {
       document.getElementById('camera-guidance').textContent = state.attendanceAction === 'LOGOUT'
         ? 'Recognizing face & recording Logout...'
@@ -764,7 +820,7 @@ async function handleCameraCapture(imageBase64, opts = {}) {
     if (state.cameraMode === 'register') {
       setScanning(false);
       setBanner('camera-error', err.message || 'Registration failed. Please try again.');
-    } else if (err instanceof ApiError && (err.code === 'ALREADY_MARKED' || err.code === 'ALREADY_LOGGED_OUT' || err.code === 'NOT_LOGGED_IN')) {
+    } else if (err instanceof ApiError && (err.code === 'ALREADY_MARKED' || err.code === 'ALREADY_LOGGED_OUT' || err.code === 'NOT_LOGGED_IN' || err.code === 'LEAVE_ALREADY_MARKED')) {
       stopAutoScan();
       setScanning(false);
       showAttendanceFailure(err.message, false, true);
@@ -914,6 +970,29 @@ document.getElementById('btn-kiosk-logout')?.addEventListener('click', () => {
   verifyGeofenceAndStartScan('LOGOUT');
 });
 
+document.getElementById('btn-kiosk-leave')?.addEventListener('click', () => {
+  if (!navigator.onLine) {
+    showAttendanceFailure("You're offline. Leave could not be recorded.", true);
+    return;
+  }
+  stopCamera();
+  showView('leaveType');
+});
+
+document.getElementById('btn-leave-sick')?.addEventListener('click', () => {
+  state.selectedLeaveType = 'SICK_LEAVE';
+  openCameraView('kiosk', 'LEAVE');
+});
+
+document.getElementById('btn-leave-annual')?.addEventListener('click', () => {
+  state.selectedLeaveType = 'ANNUAL_LEAVE';
+  openCameraView('kiosk', 'LEAVE');
+});
+
+document.getElementById('btn-leave-back')?.addEventListener('click', () => {
+  showKioskHome();
+});
+
 document.getElementById('btn-start-register').addEventListener('click', () => {
   setBanner('invite-error', '');
   showView('invite');
@@ -1021,9 +1100,15 @@ document.getElementById('btn-capture-action').addEventListener('click', async ()
 document.getElementById('btn-proxy-confirm-submit').addEventListener('click', submitProxyConfirmation);
 document.getElementById('btn-proxy-confirm-cancel').addEventListener('click', () => showKioskHome());
 
-document.getElementById('btn-result-next-worker')?.addEventListener('click', () => verifyGeofenceAndStartScan(state.attendanceAction));
+document.getElementById('btn-result-next-worker')?.addEventListener('click', () => {
+  if (state.attendanceAction === 'LEAVE') {
+    openCameraView('kiosk', 'LEAVE');
+  } else {
+    verifyGeofenceAndStartScan(state.attendanceAction);
+  }
+});
 document.getElementById('btn-result-retry').addEventListener('click', () => {
-  if (state.cameraMode === 'kiosk') {
+  if (state.cameraMode === 'kiosk' && state.attendanceAction !== 'LEAVE') {
     verifyGeofenceAndStartScan(state.attendanceAction);
   } else {
     openCameraView(state.cameraMode, state.attendanceAction);

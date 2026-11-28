@@ -87,12 +87,36 @@
         <button id="btn-kiosk-logout" type="button" class="btn btn-secondary btn-block btn-large" style="margin-top: 10px;">
           Logout Attendance
         </button>
+        <button id="btn-kiosk-leave" type="button" class="btn btn-secondary btn-block" style="margin-top: 10px;">
+          Mark Leave
+        </button>
 
         <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-subtle); text-align: center;">
           <button id="btn-start-register" type="button" class="btn btn-ghost btn-block" style="min-height: 36px; font-size: 0.875rem;">
             Have an invitation code? Register here
           </button>
         </div>
+      </section>
+
+      <!-- Mark Leave Type Choice -->
+      <section id="view-leave-type" class="card" hidden>
+        <h2 class="section-heading">Mark Leave</h2>
+        <p class="helper-text" style="margin-bottom: 16px;">
+          Select the leave type, then scan your face to automatically identify your account and deduct your leave balance.
+        </p>
+        <button id="btn-leave-sick" type="button" class="btn btn-primary btn-block btn-large">
+          Sick Leave (Paid)
+        </button>
+        <p class="helper-text" style="margin: 6px 0 14px; text-align: center;">
+          Deducts 1 day from Paid / Sick Leave balance.
+        </p>
+        <button id="btn-leave-annual" type="button" class="btn btn-secondary btn-block btn-large">
+          Annual Leave
+        </button>
+        <p class="helper-text" style="margin: 6px 0 16px; text-align: center;">
+          Deducts 1 day from Annual Leave balance.
+        </p>
+        <button id="btn-leave-back" type="button" class="btn btn-ghost btn-block">Back</button>
       </section>
 
       <!-- Step 1: Invitation Code -->

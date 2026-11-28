@@ -6,6 +6,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.UUID;
 
@@ -60,6 +61,18 @@ public class AttendanceSettings {
 
     @Column(name = "geofence_radius_meters", nullable = false)
     private int geofenceRadiusMeters = 50;
+
+    @Column(name = "default_paid_leave_quota", nullable = false)
+    private int defaultPaidLeaveQuota = 12;
+
+    @Column(name = "default_annual_leave_quota", nullable = false)
+    private int defaultAnnualLeaveQuota = 12;
+
+    @Column(name = "auto_mark_leave_after_cutoff", nullable = false)
+    private boolean autoMarkLeaveAfterCutoff = true;
+
+    @Column(name = "auto_leave_effective_from_date", nullable = false)
+    private LocalDate autoLeaveEffectiveFromDate = LocalDate.now();
 
     @Column(name = "effective_from_utc", nullable = false)
     private Instant effectiveFromUtc;
@@ -232,6 +245,38 @@ public class AttendanceSettings {
 
     public void setGeofenceRadiusMeters(int geofenceRadiusMeters) {
         this.geofenceRadiusMeters = geofenceRadiusMeters;
+    }
+
+    public int getDefaultPaidLeaveQuota() {
+        return defaultPaidLeaveQuota;
+    }
+
+    public void setDefaultPaidLeaveQuota(int defaultPaidLeaveQuota) {
+        this.defaultPaidLeaveQuota = defaultPaidLeaveQuota;
+    }
+
+    public int getDefaultAnnualLeaveQuota() {
+        return defaultAnnualLeaveQuota;
+    }
+
+    public void setDefaultAnnualLeaveQuota(int defaultAnnualLeaveQuota) {
+        this.defaultAnnualLeaveQuota = defaultAnnualLeaveQuota;
+    }
+
+    public boolean isAutoMarkLeaveAfterCutoff() {
+        return autoMarkLeaveAfterCutoff;
+    }
+
+    public void setAutoMarkLeaveAfterCutoff(boolean autoMarkLeaveAfterCutoff) {
+        this.autoMarkLeaveAfterCutoff = autoMarkLeaveAfterCutoff;
+    }
+
+    public LocalDate getAutoLeaveEffectiveFromDate() {
+        return autoLeaveEffectiveFromDate;
+    }
+
+    public void setAutoLeaveEffectiveFromDate(LocalDate autoLeaveEffectiveFromDate) {
+        this.autoLeaveEffectiveFromDate = autoLeaveEffectiveFromDate;
     }
 
     public Instant getEffectiveFromUtc() {

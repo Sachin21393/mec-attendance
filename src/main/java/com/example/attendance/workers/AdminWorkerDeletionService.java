@@ -123,6 +123,10 @@ public class AdminWorkerDeletionService {
                 .setParameter("ids", uniqueIds)
                 .executeUpdate();
 
+        entityManager.createQuery("DELETE FROM LeaveRecord l WHERE l.workerId IN :ids")
+                .setParameter("ids", uniqueIds)
+                .executeUpdate();
+
         entityManager.createQuery("""
                 DELETE FROM BiometricVerificationToken t
                 WHERE t.actorWorkerId IN :ids OR t.subjectWorkerId IN :ids

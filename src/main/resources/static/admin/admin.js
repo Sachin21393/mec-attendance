@@ -71,6 +71,8 @@ function showTab(tab) {
     loadDashboardAndGrid();
   } else if (tab === 'workers') {
     loadWorkersTable();
+  } else if (tab === 'leaves') {
+    loadLeavesOverview();
   } else if (tab === 'reports') {
     loadReportsPreview();
   } else if (tab === 'settings') {
@@ -85,6 +87,7 @@ function symbolForState(cellState) {
     case 'ON_TIME': return '✓';
     case 'LATE': return 'L';
     case 'ABSENT': return '✕';
+    case 'LEAVE': return 'LV';
     case 'HOLIDAY': return 'H';
     case 'WEEKLY_OFF': return 'W';
     case 'NOT_DUE': return '·';
@@ -116,7 +119,13 @@ async function loadDashboardAndGrid() {
     document.getElementById('kpi-ontime-today').textContent = dashboard.onTimeTodayCount;
     document.getElementById('kpi-late-today').textContent = dashboard.lateTodayCount;
     document.getElementById('kpi-absent-today').textContent = dashboard.absentTodayCount;
+    const leavesTodayEl = document.getElementById('kpi-leaves-today');
+    if (leavesTodayEl) leavesTodayEl.textContent = dashboard.leavesTodayCount ?? 0;
     document.getElementById('kpi-notdue-today').textContent = dashboard.notDueTodayCount;
+    const leavesPendingEl = document.getElementById('kpi-leaves-pending');
+    if (leavesPendingEl) leavesPendingEl.textContent = dashboard.totalPendingLeavesCount ?? 0;
+    const leavesTakenEl = document.getElementById('kpi-leaves-taken');
+    if (leavesTakenEl) leavesTakenEl.textContent = dashboard.totalApprovedLeavesCount ?? 0;
 
     document.getElementById('grid-subtitle').textContent =
       `${grid.month} · ${grid.configuredWorkingDays} configured working days · ${grid.totalWorkers} employees`;
@@ -201,9 +210,12 @@ function renderGrid(grid) {
       const logoutPart = cell.checkOutLocalTime
         ? ` · Logout ${cell.checkOutLocalTime} (${cell.logoutStatusLabel || ''})`
         : '';
+      const leavePart = cell.state === 'LEAVE' && cell.leaveTypeLabel
+        ? ` (${cell.leaveTypeLabel}${cell.leaveSourceLabel ? ' · ' + cell.leaveSourceLabel : ''})`
+        : '';
       const proxyPart = cell.method === 'PROXY' && cell.actorWorkerName ? ` (proxy by ${cell.actorWorkerName})` : '';
-      btn.setAttribute('aria-label', `${row.fullName}, ${cell.date}: ${labelForState(cell.state)}${timePart}${logoutPart}${proxyPart}`);
-      btn.title = `${cell.date}: ${labelForState(cell.state)}${timePart}${logoutPart}${proxyPart}`;
+      btn.setAttribute('aria-label', `${row.fullName}, ${cell.date}: ${labelForState(cell.state)}${timePart}${logoutPart}${leavePart}${proxyPart}`);
+      btn.title = `${cell.date}: ${labelForState(cell.state)}${timePart}${logoutPart}${leavePart}${proxyPart}`;
 
       if (cell.logoutStatus === 'EARLY_LOGOUT') {
         const dot = document.createElement('span');
@@ -226,6 +238,8 @@ function renderGrid(grid) {
 
       if (cell.recordId) {
         btn.addEventListener('click', () => openDetailDrawer(cell.recordId));
+      } else if (cell.state === 'LEAVE') {
+        btn.addEventListener('click', () => openLeaveDetailDrawer(row, cell));
       } else if (cell.state === 'ABSENT' || cell.state === 'NOT_DUE') {
         btn.addEventListener('click', () => openManualExceptionDrawer(row.workerId, row.fullName, row.workerCode, cell.date));
       } else {
@@ -320,6 +334,24 @@ async function openDetailDrawer(recordId) {
   } catch (err) {
     body.innerHTML = `<div class="banner banner-error">${escapeHtml(err.message || 'Failed to load details.')}</div>`;
   }
+}
+
+function openLeaveDetailDrawer(row, cell) {
+  const drawer = document.getElementById('detail-drawer');
+  const body = document.getElementById('drawer-body');
+  drawer.hidden = false;
+  body.innerHTML = `
+    <div class="detail-kv"><span>Employee</span><strong>${escapeHtml(row.fullName)} (${escapeHtml(row.workerCode)})</strong></div>
+    <div class="detail-kv"><span>Date</span><strong>${escapeHtml(cell.date)}</strong></div>
+    <div class="detail-kv"><span>Status</span><strong>Leave (Auto-approved)</strong></div>
+    <div class="detail-kv"><span>Leave Type</span><strong>${escapeHtml(cell.leaveTypeLabel || '-')}</strong></div>
+    <div class="detail-kv"><span>Recorded Via</span><strong>${escapeHtml(cell.leaveSourceLabel || '-')}</strong></div>
+    <div class="detail-kv"><span>Paid / Sick Pending</span><strong>${row.paidLeavePending ?? 0} remaining (${row.paidLeaveTaken ?? 0} taken)</strong></div>
+    <div class="detail-kv"><span>Annual Leave Pending</span><strong>${row.annualLeavePending ?? 0} remaining (${row.annualLeaveTaken ?? 0} taken)</strong></div>
+    <p class="helper-text" style="margin-top: 14px;">
+      Need to replace a post-cutoff leave with actual attendance? Use the <strong>Leaves</strong> tab or contact your admin.
+    </p>
+  `;
 }
 
 function openManualExceptionDrawer(workerId, fullName, workerCode, date) {
@@ -606,8 +638,91 @@ function shiftMonth(delta) {
   loadDashboardAndGrid();
   if (state.activeTab === 'settings') {
     loadCalendarAndSettings();
+  } else if (state.activeTab === 'leaves') {
+    loadLeavesOverview();
   } else if (state.activeTab === 'reports') {
     loadReportsPreview();
+  }
+}
+
+async function loadLeavesOverview() {
+  setGlobalError('');
+  const query = document.getElementById('leaves-search')?.value.trim() || '';
+  const team = document.getElementById('leaves-team-filter')?.value || '';
+  const balanceBody = document.getElementById('leaves-balance-tbody');
+  const entriesBody = document.getElementById('leaves-entries-tbody');
+  if (balanceBody) balanceBody.innerHTML = '<tr><td colspan="11" class="helper-text">Loading employee leaves...</td></tr>';
+  if (entriesBody) entriesBody.innerHTML = '<tr><td colspan="7" class="helper-text">Loading leave entries...</td></tr>';
+
+  try {
+    const data = await apiFetch(
+      `/api/v1/admin/leaves?month=${encodeURIComponent(state.month)}&query=${encodeURIComponent(query)}&team=${encodeURIComponent(team)}`
+    );
+    document.getElementById('leaves-kpi-working-days').textContent = data.totalWorkingDays;
+    document.getElementById('leaves-kpi-paid-quota').textContent = `${data.paidLeaveQuota} days`;
+    document.getElementById('leaves-kpi-annual-quota').textContent = `${data.annualLeaveQuota} days`;
+    document.getElementById('leaves-kpi-taken').textContent = data.totalApprovedTaken;
+    document.getElementById('leaves-kpi-pending').textContent = data.totalPendingRemaining;
+    document.getElementById('leaves-subtitle').textContent =
+      `${data.month} (${data.timezoneId}) · Total working days this month: ${data.totalWorkingDays} · Auto-leave after cutoff: ${data.autoMarkLeaveAfterCutoff ? 'On' : 'Off'}`;
+
+    const teamSel = document.getElementById('leaves-team-filter');
+    if (teamSel) {
+      teamSel.innerHTML = '<option value="">All teams</option>';
+      (data.teams || []).forEach((t) => {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        if (t === team) opt.selected = true;
+        teamSel.appendChild(opt);
+      });
+    }
+
+    balanceBody.innerHTML = '';
+    if (!data.employees || data.employees.length === 0) {
+      balanceBody.innerHTML = '<tr><td colspan="11" class="helper-text">No matching employees found.</td></tr>';
+    } else {
+      data.employees.forEach((emp) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><strong>${escapeHtml(emp.workerCode)}</strong></td>
+          <td>${escapeHtml(emp.fullName)}</td>
+          <td>${escapeHtml(emp.teamName || '-')}</td>
+          <td><strong>${emp.applicableWorkingDays}</strong> / ${emp.monthWorkingDays}</td>
+          <td>${emp.monthLeaveDays}</td>
+          <td>${emp.paidLeaveTaken} / ${emp.paidLeaveQuota}</td>
+          <td><strong>${emp.paidLeavePending}</strong></td>
+          <td>${emp.annualLeaveTaken} / ${emp.annualLeaveQuota}</td>
+          <td><strong>${emp.annualLeavePending}</strong></td>
+          <td><strong>${emp.totalApprovedTaken}</strong></td>
+          <td><strong>${emp.totalPendingRemaining}</strong></td>
+        `;
+        balanceBody.appendChild(tr);
+      });
+    }
+
+    entriesBody.innerHTML = '';
+    if (!data.entries || data.entries.length === 0) {
+      entriesBody.innerHTML = '<tr><td colspan="7" class="helper-text">No leaves recorded in this month.</td></tr>';
+    } else {
+      data.entries.forEach((entry) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><strong>${escapeHtml(entry.leaveDate)}</strong></td>
+          <td>${escapeHtml(entry.workerCode)}</td>
+          <td>${escapeHtml(entry.fullName)}</td>
+          <td>${escapeHtml(entry.leaveTypeLabel)}</td>
+          <td>${escapeHtml(entry.sourceLabel)}</td>
+          <td><span class="status-badge status-ontime">Approved</span></td>
+          <td class="helper-text">${escapeHtml(entry.notes || '-')}</td>
+        `;
+        entriesBody.appendChild(tr);
+      });
+    }
+  } catch (err) {
+    if (balanceBody) balanceBody.innerHTML = '';
+    if (entriesBody) entriesBody.innerHTML = '';
+    setGlobalError(err.message || 'Could not load leave overview.');
   }
 }
 
@@ -637,7 +752,7 @@ async function loadReportsPreview() {
 
     tbody.innerHTML = '';
     if (preview.workers.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="11" class="helper-text">No matching employees found.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="12" class="helper-text">No matching employees found.</td></tr>';
       return;
     }
     preview.workers.forEach((w) => {
@@ -651,6 +766,7 @@ async function loadReportsPreview() {
         <td>${w.onTimeDays}</td>
         <td>${w.lateDays}</td>
         <td>${w.absentDays}</td>
+        <td>${w.leaveDays ?? 0}</td>
         <td>${w.holidayDays + w.weeklyOffDays}</td>
         <td>${w.earlyLogoutDays ?? 0}</td>
         <td>${w.extendedWorkHoursDays ?? 0}</td>
@@ -718,6 +834,12 @@ async function loadCalendarAndSettings() {
     document.getElementById('set-geofence-longitude').value = s.geofenceLongitude != null ? s.geofenceLongitude : '';
     document.getElementById('set-geofence-radius').value = s.geofenceRadiusMeters != null ? s.geofenceRadiusMeters : 50;
     syncGeofenceStatusUi(s);
+    const paidQuotaEl = document.getElementById('set-paid-leave-quota');
+    if (paidQuotaEl) paidQuotaEl.value = s.paidLeaveQuota != null ? s.paidLeaveQuota : 12;
+    const annualQuotaEl = document.getElementById('set-annual-leave-quota');
+    if (annualQuotaEl) annualQuotaEl.value = s.annualLeaveQuota != null ? s.annualLeaveQuota : 12;
+    const autoLeaveEl = document.getElementById('set-auto-leave-cutoff');
+    if (autoLeaveEl) autoLeaveEl.checked = s.autoMarkLeaveAfterCutoff !== false;
 
     const threshInput = document.getElementById('set-face-threshold');
     const modelInput = document.getElementById('set-face-model-version');
@@ -977,7 +1099,10 @@ function buildSettingsPayloadFromForm(overrideGeofenceEnabled = null) {
     geofenceEnabled,
     geofenceLatitude,
     geofenceLongitude,
-    geofenceRadiusMeters
+    geofenceRadiusMeters,
+    paidLeaveQuota: Number(document.getElementById('set-paid-leave-quota')?.value ?? 12),
+    annualLeaveQuota: Number(document.getElementById('set-annual-leave-quota')?.value ?? 12),
+    autoMarkLeaveAfterCutoff: document.getElementById('set-auto-leave-cutoff')?.checked ?? true
   };
   if (!threshInput.disabled) {
     body.faceMatchThreshold = Number(threshInput.value);
@@ -1139,6 +1264,15 @@ let reportsSearchTimer = null;
 document.getElementById('reports-search').addEventListener('input', () => {
   clearTimeout(reportsSearchTimer);
   reportsSearchTimer = setTimeout(loadReportsPreview, 250);
+});
+
+document.getElementById('btn-leaves-refresh')?.addEventListener('click', loadLeavesOverview);
+document.getElementById('btn-leaves-settings')?.addEventListener('click', () => showTab('settings'));
+document.getElementById('leaves-team-filter')?.addEventListener('change', loadLeavesOverview);
+let leavesSearchTimer = null;
+document.getElementById('leaves-search')?.addEventListener('input', () => {
+  clearTimeout(leavesSearchTimer);
+  leavesSearchTimer = setTimeout(loadLeavesOverview, 250);
 });
 
 const enrollState = {
